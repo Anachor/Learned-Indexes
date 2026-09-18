@@ -1,0 +1,14 @@
+Base set of experiments:
+
+Ok here's a summary of the first set of experiments that we need. Note that "Model complexity" refers to the worst case bound on the time it takes to binary search over the line segments and then do a local binary search within the data structure so its log(L) + log(delta) where L is the number of lines and delta is the error.
+
+1.This experiment is about understanding the optimal model complexity you get with running O'rourke's on a sorted array. We test all the different prefixes of a random permutation of {1,2,...,n}. 
+1.a. For every prefix, find the optimal model complexity. Possible visualizations: Draw the optimal model complexity as a function of prefix size, draw the delta which produces the optimal model complexity as a function of prefix size.
+1.b. Same thing as (a) but you only set one specific delta, and then report the model complexity you get for every prefix, visualize it by drawing the optimal model complexity as a function of prefix size. It would be interesting to overlay it with (a), and seeing whether there is some delta that gives approximate model complexity at every or a large number of prefixes.
+
+2.This experiment is about dynamizing (1). Specifically, you use Bentley Saxe + O'rourke's the same way that PGM did. 
+2.a. At every prefix we want to see the resulting model complexity, where the model complexity is defined as the sum of log(L) + log(delta) in every static instance comprising the dynamic data structure. It would be interesting to see how this quantity changes for different values of delta.
+2.b. Heuristic optimization of (a): This part can give us some insight that may be useful about whether you can improve the way this works with Bentley Saxe. Instead of deciding on a Delta, and building all of the static instances with the same Delta, every time you add a new static instance to your Bentley Saxe structure, you use the delta which produces optimal model complexity for that specific instance. This means the static components of our Bentley Saxe will at least be individually optimized.
+
+3.The same thing as (1). The only difference is instead of a sorted array, the keys are inserted into a PMA, and then O'rourke's is ran over the result. Here we mean inserted incrementally into a PMA, don't just build a PMA from scratch at every prefix (that doesn't tell us a lot, has basically the same linear complexity as a sorted packed array). 
+4.Running our algorithm on the permutation (with some predetermined value of delta) and reporting the obtained model complexity at every prefix. Try to display different values of delta, and also what delta appears to be the best.
