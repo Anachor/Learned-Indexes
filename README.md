@@ -77,3 +77,16 @@ Then open `http://localhost:8000/`. The selection is kept in the URL
 It generates nothing - run the plot script first, and if a run has no figures the
 page says which command to run. Figures are re-read on every request, so
 re-plotting and reloading the page is enough to see new output.
+
+To keep it running as a systemd user service (restarts on failure, keeps running
+after logout, starts at boot):
+
+```
+web/serve.sh --install [--port N]   # write the unit, enable and start it (default port 8289)
+web/serve.sh --up | --down | --restart | --status
+```
+
+Re-run `--install` to change the port, or after moving the repo - it writes the
+unit with this checkout's path. `--restart` after editing `serve.py`; new figures
+and frontend edits only need a browser reload. `journalctl --user -u results-server -f`
+follows its log.

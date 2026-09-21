@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experiment</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="back" href="/">&larr; experiments</a>
+  <h1 id="title">&hellip;</h1>
+</header>
+
+<main>
+  <div id="pickers" class="pickers" hidden>
+    <label>
+      <span>Run</span>
+      <select id="run"></select>
+    </label>
+    <label>
+      <span>n</span>
+      <select id="n"></select>
+    </label>
+    <a id="csv" class="csv" hidden>download CSV</a>
+  </div>
+
+  <div id="figures"></div>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

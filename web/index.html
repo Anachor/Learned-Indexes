@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experiment results</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Experiment results</h1>
+  <p class="subtitle">GPLA &mdash; figures written by the experiment plot scripts</p>
+</header>
+
+<main>
+  <div id="experiments" class="cards"></div>
+</main>
+
+<script>
+const target = document.getElementById("experiments");
+
+function card(entry) {
+  const latest = entry.runs.length ? entry.runs[0] : null;
+  const link = document.createElement("a");
+  link.className = "card";
+  link.href = "/exp/" + encodeURIComponent(entry.name);
+
+  const name = document.createElement("h2");
+  name.textContent = entry.name;
+  link.appendChild(name);
+
+  const meta = document.createElement("dl");
+  const rows = [
+    ["runs", entry.runs.length || "none"],
+    ["latest run", latest === null ? "—" : latest],
+    ["figures", entry.figure_count],
+  ];
+  for (const [key, value] of rows) {
+    const term = document.createElement("dt");
+    term.textContent = key;
+    const definition = document.createElement("dd");
+    definition.textContent = value;
+    meta.appendChild(term);
+    meta.appendChild(definition);
+  }
+  link.appendChild(meta);
+
+  if (entry.figure_count === 0) {
+    const note = document.createElement("p");
+    note.className = "warn";
+    note.textContent = "no figures yet";
+    link.appendChild(note);
+  }
+  return link;
+}
+
+fetch("/api/experiments")
+  .then((response) => response.json())
+  .then((listing) => {
+    if (!listing.length) {
+      target.innerHTML =
+        '<p class="empty">No experiments found. Run an experiment to create ' +
+        '<code>results/&lt;exp&gt;/&lt;run&gt;/</code>, then its plot script to ' +
+        'create <code>figures/&lt;exp&gt;/&lt;run&gt;/</code>.</p>';
+      return;
+    }
+    for (const entry of listing) target.appendChild(card(entry));
+  })
+  .catch((error) => {
+    target.innerHTML = '<p class="empty">Could not load experiments: ' + error + "</p>";
+  });
+</script>
+</body>
+</html>
