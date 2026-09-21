@@ -80,13 +80,13 @@ function runMeta(run) {
   return (data.meta || {})[run] || null;
 }
 
-// "3 · a1b2c3", with * when the code had uncommitted changes. Just the number
-// for runs without a known commit.
+// "2 · zipf:16,1": the permutation is what tells runs apart. Just the number
+// for runs whose meta.json does not name one.
 function runChoices() {
   return data.runs.map((run) => {
     const meta = runMeta(run);
-    const commit = meta && meta.commit && meta.commit !== "unknown" ? meta.commit : null;
-    return [String(run), commit ? run + " · " + commit + (meta.dirty ? "*" : "") : String(run)];
+    const order = meta && meta.permutation ? meta.permutation : null;
+    return [String(run), order ? run + " · " + order : String(run)];
   });
 }
 
