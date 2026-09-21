@@ -167,12 +167,27 @@ def binary(root, experiment):
     return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
 
 
+def metadata(root, experiment, run):
+    """The run's results/<exp>/<run>/meta.json, or None if it has none or it
+    does not parse. Runs from before exp1 wrote one have none."""
+    path = os.path.join(root, "results", experiment, str(run), "meta.json")
+    try:
+        with open(path) as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
 def base_seed(root, experiment, run):
     """The seed a run was started with, or None.
 
-    Each CSV row holds the per-n seed, seed + n, so any one row of any of the
-    run's CSVs gives it back.
+    From the run's meta.json when it has one. Otherwise from its CSVs: each row
+    holds the per-n seed, seed + n, so any one row of any of them gives it back.
     """
+    meta = metadata(root, experiment, run)
+    if meta and isinstance(meta.get("seed"), int):
+        return meta["seed"]
     for path in sorted(glob.glob(os.path.join(root, "results", experiment, str(run), "*.csv"))):
         try:
             with open(path) as handle:
@@ -184,15 +199,37 @@ def base_seed(root, experiment, run):
     return None
 
 
-def simulate(root, experiment, run, n, t):
-    """Runs <exp> --simulate on one prefix: (payload, None) or (None, error)."""
+PERMUTATION = re.compile(r"^(uniform|probing|blocks:\d+|zipf:\d+,[0-9.eE+-]+)$")
+
+
+def permutation(root, experiment, run):
+    """The run's --permutation spec from its meta.json; "uniform" when it has
+    none, or none that exp1 would accept."""
+    meta = metadata(root, experiment, run) or {}
+    spec = meta.get("permutation")
+    return spec if isinstance(spec, str) and PERMUTATION.match(spec) else "uniform"
+
+
+def simulate(root, experiment, run, n, t, k=None):
+    """Runs <exp> --simulate on one prefix: (payload, None) or (None, error).
+
+    Without k: the keys, the table of every delta tried, and the best delta's
+    segments. With k: only the segments for delta = k/2, fetched when another
+    row of the table is picked.
+    """
     program = binary(root, experiment)
     if program is None:
         return None, f"experiments/{experiment}/{experiment} is not built"
     seed = base_seed(root, experiment, run)
     if seed is None:
-        return None, f"no CSV in results/{experiment}/{run}/ to take the seed from"
-    command = [program, "--simulate", str(t), "--json", "-n", str(n), str(seed)]
+        return None, f"no meta.json or CSV in results/{experiment}/{run}/ to take the seed from"
+    mode = ["--json"] if k is None else ["--segments", str(k)]
+    # The run's insertion order, so the simulation rebuilds its keys. Runs
+    # without one in their meta.json predate the option and are uniform.
+    order = permutation(root, experiment, run)
+    order_flag = ["--permutation", order] if order != "uniform" else []
+    tail = order_flag + ["-n", str(n), str(seed)]
+    command = [program, "--simulate", str(t)] + mode + tail
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=SIMULATE_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -200,8 +237,11 @@ def simulate(root, experiment, run, n, t):
     if done.returncode != 0:
         return None, (done.stderr.strip().splitlines() or ["simulation failed"])[0]
     payload = json.loads(done.stdout)
-    payload["run"] = run
-    payload["command"] = " ".join([f"experiments/{experiment}/{experiment}"] + command[1:3] + command[4:])
+    if k is None:
+        payload["run"] = run
+        # The table-printing form: the same command without --json.
+        payload["command"] = " ".join([f"experiments/{experiment}/{experiment}",
+                                       "--simulate", str(t)] + tail)
     return payload, None
 
 
@@ -239,6 +279,7 @@ def detail(root, experiment):
         "label": label(experiment),
         "runs": numbers,
         "simulate": binary(root, experiment) is not None,
+        "meta": {str(run): metadata(root, experiment, run) for run in numbers},
         "figures": {str(run): {str(n): images
                                for n, images in figures(root, experiment, run).items()}
                     for run in numbers},
@@ -379,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1] not in experiments(self.root):
                 return self.send_missing(f"no experiment {parts[1]!r}")
             return self.send_json(detail(self.root, parts[1]))
-        # /api/simulate/<exp>?run=R&n=N&t=T
+        # /api/simulate/<exp>?run=R&n=N&t=T[&k=K]
         if len(parts) == 2 and parts[0] == "simulate":
             return self.simulate(parts[1], query)
         return self.send_missing()
@@ -389,15 +430,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_missing(f"no experiment {experiment!r}")
         try:
             run, n, t = (int(query[key][0]) for key in ("run", "n", "t"))
+            k = int(query["k"][0]) if "k" in query else None
         except (KeyError, ValueError):
-            return self.send_json({"error": "run, n and t must be integers"}, status=400)
+            return self.send_json({"error": "run, n, t and k must be integers"}, status=400)
+        if k is not None and not 1 <= k <= 2 * n:
+            return self.send_json({"error": f"k must be 1 to {2 * n}"}, status=400)
         if run not in runs(self.root, experiment):
             return self.send_missing(f"no run {run}")
         if not 1 <= n <= SIMULATE_MAX_N:
             return self.send_json({"error": f"n must be 1 to {SIMULATE_MAX_N}"}, status=400)
         if not 1 <= t <= min(n, SIMULATE_MAX_T):
             return self.send_json({"error": f"t must be 1 to {min(n, SIMULATE_MAX_T)}"}, status=400)
-        payload, error = simulate(self.root, experiment, run, n, t)
+        payload, error = simulate(self.root, experiment, run, n, t, k)
         if error:
             return self.send_json({"error": error}, status=500)
         return self.send_json(payload)

@@ -182,17 +182,37 @@ button {
 button:hover, button.active { border-color: var(--link); color: var(--link); }
 button:disabled { opacity: 0.5; cursor: progress; }
 
-/* simulation */
+/* tabs */
 
-.simulation {
-  margin-bottom: 32px;
-  padding-bottom: 24px;
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: -12px 0 24px;
   border-bottom: 1px solid var(--border);
 }
 
-.simulation .pickers {
-  border-bottom: none;
-  padding-bottom: 0;
+.tabs button {
+  margin-bottom: -1px;
+  padding: 8px 18px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--muted);
+}
+
+.tabs button:hover { color: var(--text); border-color: transparent; }
+
+.tabs button.active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+  font-weight: 600;
+}
+
+/* simulate tab */
+
+#tab-simulate .pickers {
   margin-bottom: 16px;
 }
 
@@ -204,9 +224,29 @@ button:disabled { opacity: 0.5; cursor: progress; }
 
 .pickers .status { margin: 0; align-self: center; }
 
+/* the run's metadata: its own full-width line under the pickers */
+#run-meta { flex-basis: 100%; }
+#run-meta.incomplete { color: var(--warn); }
+
+/* Every half-step of delta is a row, so the table scrolls on its own. */
+.table-wrap {
+  position: relative;  /* rows' offsetTop is measured from here */
+  display: inline-block;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+table.deltas thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+
 table.deltas {
   border-collapse: collapse;
-  margin-bottom: 12px;
   font-variant-numeric: tabular-nums;
   font-size: 14px;
 }

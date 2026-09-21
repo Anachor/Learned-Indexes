@@ -11,15 +11,17 @@ and overall/, across n, each point a statistic over that n's prefixes:
   best_delta.png         the best delta: median, mean and max
 
 Query complexity is log2(lambda) + log2(delta), computed here from k and L
-(delta = k/2) rather than read from the CSV's cost column, which exp1 writes as
-log2(lambda) + log2(2 delta). The two differ by exactly 1, so the best delta
-and its lambda are the same under either.
+(delta = k/2) rather than read from the CSV's cost column: exp1 writes that
+column the same way now, but earlier runs wrote log2(lambda) + log2(2 delta),
+exactly 1 more. The best delta and its lambda are the same under either.
 """
 
 import argparse
 import glob
+import json
 import os
 import re
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -167,6 +169,17 @@ def main():
     run = arguments.run if arguments.run is not None else latest_run(arguments.results)
     results = os.path.join(arguments.results, str(run))
     figures = os.path.join(arguments.figures, str(run))
+
+    # A run that was stopped part-way keeps status "running": its last CSV may be
+    # cut short, and plotting it would show a curve that just stops.
+    try:
+        with open(os.path.join(results, "meta.json")) as handle:
+            status = json.load(handle).get("status")
+    except (OSError, ValueError):
+        status = None
+    if status is not None and status != "complete":
+        print(f"warning: run {run} is {status!r}, not complete - its results may be partial",
+              file=sys.stderr)
 
     paths = sorted(glob.glob(os.path.join(results, "exp1_n*.csv")),
                    key=lambda p: int(re.search(r"exp1_n(\d+)\.csv$", p).group(1)))

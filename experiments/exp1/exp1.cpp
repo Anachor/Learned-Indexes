@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -33,7 +34,7 @@ inline void omp_set_num_threads(int) {}
 // k = 2*delta, so delta covers the half-integers; the points go to O'Rourke as
 // (key, 2*rank) with integer bound k.
 //
-//   query complexity = log2(segment size) + log2(k)
+//   query complexity = log2(delta) + log2(segment size), delta = k/2
 //
 // 1b is the fixed k below; 1a is the k minimising the query complexity. Both are
 // measured in one pass, and every k evaluated is written out.
@@ -51,7 +52,9 @@ struct Row {
     bool best;   // the minimiser (1a)
 };
 
-double query_complexity(size_t L, int64_t k) { return std::log2(double(L)) + std::log2(double(k)); }
+// log2(delta) + log2(lambda). Minimising it is minimising k * L, which is what
+// the search does, exactly, in integers.
+double query_complexity(size_t L, int64_t k) { return std::log2(double(k) / 2) + std::log2(double(L)); }
 
 // Segment size of a sorted prefix under bound k, using y = 2*rank.
 size_t count_segments(ORourke<int64_t> &orourke, const std::vector<int64_t> &x, int64_t k) {
@@ -126,13 +129,144 @@ std::vector<Row> analyse_prefix(ORourke<int64_t> &orourke, const std::vector<int
     return rows;
 }
 
-// The random permutation of {1..n} for this seed. run_n, validate and simulate
-// all draw it from here, so a simulation sees exactly the keys a run saw.
+// The insertion order of {1..n}, chosen with --permutation:
+//
+//   uniform      a uniformly random permutation (the default)
+//   zipf:R,s     the keys split into R equal regions; each insert picks a region
+//                with weight 1/rank^s among those not yet full, then a random
+//                key in it. Region ranks are shuffled, so the hot regions sit
+//                anywhere. Prefixes mix dense and sparse regions.
+//   blocks:b     the keys in blocks of b consecutive keys; the blocks in random
+//                order, the keys in each block in random order
+//   probing      linear probing: pick a random key, and if it is already in,
+//                take the next one up, wrapping from n to 1
+//
+// Uniform prefixes are random subsets, whose best fit is almost always a
+// single segment; the others vary the key density along the prefix.
+struct Order {
+    std::string kind = "uniform";
+    size_t regions = 0;  // zipf R
+    double skew = 0;     // zipf s
+    size_t block = 0;    // blocks b
+
+    // The spec as given back to --permutation: "zipf:16,1".
+    std::string spec() const {
+        char buffer[64];
+        if (kind == "zipf") std::snprintf(buffer, sizeof buffer, "zipf:%zu,%g", regions, skew);
+        else if (kind == "blocks") std::snprintf(buffer, sizeof buffer, "blocks:%zu", block);
+        else return kind;
+        return buffer;
+    }
+};
+
+// Parsed from --permutation in main, before anything draws a permutation.
+Order ORDER;
+
+// Parses a --permutation spec; false if it is not one.
+bool parse_order(const std::string &s, Order &order) {
+    size_t colon = s.find(':');
+    std::string kind = s.substr(0, colon), args = colon == std::string::npos ? "" : s.substr(colon + 1);
+    order = Order();
+    order.kind = kind;
+    try {
+        if (kind == "uniform" || kind == "probing") return args.empty();
+        if (kind == "blocks") {
+            size_t used;
+            long long b = std::stoll(args, &used);
+            if (used != args.size() || b < 1) return false;
+            order.block = size_t(b);
+            return true;
+        }
+        if (kind == "zipf") {
+            size_t comma = args.find(',');
+            if (comma == std::string::npos) return false;
+            std::string r = args.substr(0, comma), sk = args.substr(comma + 1);
+            size_t used_r, used_s;
+            long long regions = std::stoll(r, &used_r);
+            double skew = std::stod(sk, &used_s);
+            if (used_r != r.size() || used_s != sk.size() || regions < 1 || !(skew >= 0)) return false;
+            order.regions = size_t(regions);
+            order.skew = skew;
+            return true;
+        }
+    } catch (const std::exception &) {
+    }
+    return false;
+}
+
+// The insertion order of {1..n} for this seed, under ORDER. run_n, validate and
+// simulate all draw it from here, so a simulation sees exactly the keys a run
+// saw. The uniform order is the same shuffle as before the other orders
+// existed, so earlier runs reproduce.
 std::vector<int64_t> make_permutation(size_t n, uint64_t seed) {
-    std::vector<int64_t> permutation(n);
-    std::iota(permutation.begin(), permutation.end(), 1);
     std::mt19937_64 rng(seed);
-    std::shuffle(permutation.begin(), permutation.end(), rng);
+    std::vector<int64_t> permutation;
+    permutation.reserve(n);
+
+    if (ORDER.kind == "zipf") {
+        // Region g holds keys (g*n/R, (g+1)*n/R], each region's keys pre-shuffled
+        // so taking from the back is a random pick. With R > n some regions are
+        // empty and never picked.
+        size_t R = ORDER.regions;
+        std::vector<std::vector<int64_t>> regions(R);
+        for (size_t g = 0; g < R; ++g) {
+            for (size_t key = g * n / R + 1; key <= (g + 1) * n / R; ++key) regions[g].push_back(int64_t(key));
+            std::shuffle(regions[g].begin(), regions[g].end(), rng);
+        }
+        std::vector<size_t> by_rank(R);  // by_rank[i]: the region with weight 1/(i+1)^s
+        std::iota(by_rank.begin(), by_rank.end(), 0);
+        std::shuffle(by_rank.begin(), by_rank.end(), rng);
+
+        std::vector<double> weight(R);
+        for (size_t i = 0; i < R; ++i) weight[i] = 1 / std::pow(double(i + 1), ORDER.skew);
+        std::vector<double> live(R);
+        while (permutation.size() < n) {
+            for (size_t i = 0; i < R; ++i) live[i] = regions[by_rank[i]].empty() ? 0 : weight[i];
+            std::discrete_distribution<size_t> pick(live.begin(), live.end());
+            std::vector<int64_t> &region = regions[by_rank[pick(rng)]];
+            permutation.push_back(region.back());
+            region.pop_back();
+        }
+    } else if (ORDER.kind == "blocks") {
+        size_t b = ORDER.block, count = (n + b - 1) / b;
+        std::vector<size_t> blocks(count);
+        std::iota(blocks.begin(), blocks.end(), 0);
+        std::shuffle(blocks.begin(), blocks.end(), rng);
+        for (size_t block : blocks) {
+            size_t first = permutation.size();
+            for (size_t key = block * b + 1; key <= std::min(n, (block + 1) * b); ++key) {
+                permutation.push_back(int64_t(key));
+            }
+            std::shuffle(permutation.begin() + first, permutation.end(), rng);
+        }
+    } else if (ORDER.kind == "probing") {
+        // next[i]: the smallest free key >= i, via path-compressed pointers, so
+        // a probe costs near O(1) however long the runs grow. Index n + 1 means
+        // "past the end", from where the probe wraps to 1.
+        std::vector<size_t> next(n + 2);
+        std::iota(next.begin(), next.end(), 0);
+        auto free_from = [&](size_t i) {
+            size_t root = i;
+            while (next[root] != root) root = next[root];
+            while (next[i] != root) {
+                size_t up = next[i];
+                next[i] = root;
+                i = up;
+            }
+            return root;
+        };
+        std::uniform_int_distribution<size_t> pick(1, n);
+        for (size_t inserted = 0; inserted < n; ++inserted) {
+            size_t key = free_from(pick(rng));
+            if (key == n + 1) key = free_from(1);
+            permutation.push_back(int64_t(key));
+            next[key] = key + 1;
+        }
+    } else {
+        permutation.resize(n);
+        std::iota(permutation.begin(), permutation.end(), 1);
+        std::shuffle(permutation.begin(), permutation.end(), rng);
+    }
     return permutation;
 }
 
@@ -315,35 +449,60 @@ std::vector<Segment> segments_of(ORourke<int64_t> &orourke, const std::vector<in
     return segments;
 }
 
-// One prefix of length t, delta = 1/2, 1, 2, 4, ... (k = 1, 2, 4, ...), with
+// The segments as JSON: [begin, end, x0, y0, slope] each, the line in (key, rank).
+std::string segments_json(const std::vector<Segment> &segments) {
+    std::ostringstream out;
+    out.precision(17);
+    out << '[';
+    for (size_t s = 0; s < segments.size(); ++s) {
+        const Segment &g = segments[s];
+        out << (s ? "," : "") << '[' << g.begin << ',' << g.end << ',' << double(g.line.x0) << ','
+            << double(g.line.y0) << ',' << double(g.line.slope) << ']';
+    }
+    out << ']';
+    return out.str();
+}
+
+// One prefix of length t, delta = 1/2, 1, 3/2, 2, ... (k = 1, 2, 3, ...), with
 // qc = log2(delta) + log2(lambda). lambda >= 1, so qc >= log2(delta): once the
 // next delta reaches the best delta * lambda so far, no larger delta can have a
-// lower qc and the doubling stops. In k: stop when 2k >= k_best * L_best.
+// lower qc and the search stops. In k: stop when k + 1 >= k_best * L_best.
 //
-// Prints delta,lambda,qc as CSV, or with json the keys and every delta's
-// segments as well, for the results server to draw.
-void simulate(size_t n, size_t t, uint64_t seed, bool json) {
+// Prints delta,lambda,qc as CSV. With json: the keys, the table, and the best
+// delta's segments, for the results server to draw. With segments_k: only the
+// segments for that k, which the server fetches when another row is picked -
+// sending every delta's segments up front would be megabytes at large t.
+void simulate(size_t n, size_t t, uint64_t seed, bool json, int64_t segments_k) {
     std::vector<int64_t> permutation = make_permutation(n, seed);
     std::vector<int64_t> x(permutation.begin(), permutation.begin() + t);
     std::sort(x.begin(), x.end());
-
     PgmORourke<int64_t> orourke(1);
-    std::vector<std::pair<int64_t, std::vector<Segment>>> tried;
-    __int128 best_product = -1;
-    for (int64_t k = 1;; k *= 2) {
-        tried.emplace_back(k, segments_of(orourke, x, k));
-        __int128 product = __int128(k) * tried.back().second.size();
-        if (best_product < 0 || product < best_product) best_product = product;
-        if (__int128(2 * k) >= best_product) break;
+
+    if (segments_k) {
+        std::cout << "{\"k\":" << segments_k << ",\"segments\":"
+                  << segments_json(segments_of(orourke, x, segments_k)) << "}\n";
+        return;
     }
 
-    auto qc = [](int64_t k, size_t L) { return std::log2(double(k) / 2) + std::log2(double(L)); };
+    std::vector<std::pair<int64_t, size_t>> tried;  // (k, lambda)
+    __int128 best_product = -1;
+    int64_t best_k = 1;
+    for (int64_t k = 1;; ++k) {
+        size_t L = count_segments(orourke, x, k);
+        tried.emplace_back(k, L);
+        __int128 product = __int128(k) * L;
+        if (best_product < 0 || product < best_product) {
+            best_product = product;
+            best_k = k;
+        }
+        if (__int128(k + 1) >= best_product) break;
+    }
 
     if (!json) {
         std::cout << "seed,n,t,delta,lambda,qc\n";
-        for (const auto &[k, segments] : tried) {
-            std::cout << seed << ',' << n << ',' << t << ',' << double(k) / 2 << ','
-                      << segments.size() << ',' << qc(k, segments.size()) << '\n';
+        for (const auto &[k, L] : tried) {
+            std::cout << seed << ',' << n << ',' << t << ',' << double(k) / 2 << ',' << L << ','
+                      << query_complexity(L, k) << '\n';
         }
         return;
     }
@@ -354,17 +513,12 @@ void simulate(size_t n, size_t t, uint64_t seed, bool json) {
     for (size_t i = 0; i < x.size(); ++i) out << (i ? "," : "") << x[i];
     out << "],\"deltas\":[";
     for (size_t j = 0; j < tried.size(); ++j) {
-        const auto &[k, segments] = tried[j];
-        out << (j ? "," : "") << "{\"delta\":" << double(k) / 2 << ",\"lambda\":" << segments.size()
-            << ",\"qc\":" << qc(k, segments.size()) << ",\"segments\":[";
-        for (size_t s = 0; s < segments.size(); ++s) {
-            const Segment &g = segments[s];
-            out << (s ? "," : "") << '[' << g.begin << ',' << g.end << ',' << double(g.line.x0) << ','
-                << double(g.line.y0) << ',' << double(g.line.slope) << ']';
-        }
-        out << "]}";
+        const auto &[k, L] = tried[j];
+        out << (j ? "," : "") << "{\"k\":" << k << ",\"delta\":" << double(k) / 2 << ",\"lambda\":" << L
+            << ",\"qc\":" << query_complexity(L, k) << '}';
     }
-    out << "]}\n";
+    out << "],\"best_k\":" << best_k << ",\"segments\":" << segments_json(segments_of(orourke, x, best_k))
+        << "}\n";
     std::cout << out.str();
 }
 
@@ -386,20 +540,111 @@ std::string next_run_dir(const std::string &base) {
     return dir;
 }
 
+// The commit this binary was built from, baked in by experiments/exp1/build.sh.
+// A plain g++ build leaves it unknown.
+#ifndef GIT_COMMIT
+#define GIT_COMMIT "unknown"
+#endif
+#ifndef GIT_DIRTY
+#define GIT_DIRTY "unknown"  // "true" / "false" from build.sh
+#endif
+
+std::string json_string(const std::string &s) {
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            char buffer[8];
+            std::snprintf(buffer, sizeof buffer, "\\u%04x", c);
+            out += buffer;
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
+}
+
+std::string utc_now() {
+    std::time_t now = std::time(nullptr);
+    char buffer[32];
+    std::strftime(buffer, sizeof buffer, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
+    return buffer;
+}
+
+// DIR/<run>/meta.json: what the run is, so its numbers can be interpreted and
+// reproduced. Rewritten after every n, so an interrupted run says how far it
+// got: status stays "running" unless the run finished.
+struct RunMeta {
+    std::string path, command, started, finished;
+    int run = 0;
+    uint64_t seed = 0;
+    std::vector<size_t> sizes;
+    struct Timing { size_t n; double seconds, mean_evaluations; size_t max_evaluations; };
+    std::vector<Timing> timing;
+
+    void write() const {
+        std::ostringstream o;
+        o << "{\n"
+          << "  \"experiment\": \"exp1\",\n"
+          << "  \"run\": " << run << ",\n"
+          << "  \"status\": \"" << (finished.empty() ? "running" : "complete") << "\",\n"
+          << "  \"seed\": " << seed << ",\n"
+          << "  \"seed_rule\": \"each n uses seed + n\",\n"
+          << "  \"permutation\": " << json_string(ORDER.spec()) << ",\n"
+          << "  \"ns\": [";
+        for (size_t i = 0; i < sizes.size(); ++i) o << (i ? ", " : "") << sizes[i];
+        o << "],\n  \"fixed_deltas\": [";
+        for (size_t i = 0; i < FIXED_K.size(); ++i) o << (i ? ", " : "") << double(FIXED_K[i]) / 2;
+        o << "],\n"
+          << "  \"cost\": \"log2(delta) + log2(lambda)\",\n"
+          << "  \"commit\": " << json_string(GIT_COMMIT) << ",\n"
+          << "  \"dirty\": " << (std::string(GIT_DIRTY) == "unknown" ? "null" : GIT_DIRTY) << ",\n"
+          << "  \"command\": " << json_string(command) << ",\n"
+          << "  \"started\": " << json_string(started) << ",\n"
+          << "  \"finished\": " << (finished.empty() ? "null" : json_string(finished)) << ",\n"
+          << "  \"timing\": {";
+        for (size_t i = 0; i < timing.size(); ++i) {
+            const Timing &t = timing[i];
+            o << (i ? "," : "") << "\n    \"" << t.n << "\": {\"seconds\": " << t.seconds
+              << ", \"mean_evaluations\": " << t.mean_evaluations
+              << ", \"max_evaluations\": " << t.max_evaluations << "}";
+        }
+        o << (timing.empty() ? "}" : "\n  }") << "\n}\n";
+
+        // Write and rename, so a reader never sees half a file.
+        std::string temporary = path + ".tmp";
+        std::ofstream(temporary) << o.str();
+        std::filesystem::rename(temporary, path);
+    }
+};
+
 void usage(const char *program) {
-    std::cerr << "usage: " << program << " [-n N,N,...] [-j THREADS] [--out DIR] [--validate] [seed]\n"
-              << "       " << program << " --simulate T [--json] -n N seed\n"
+    std::cerr << "usage: " << program << " [-n N,N,...] [-j THREADS] [--out DIR] [--permutation P] [--validate] [seed]\n"
+              << "       " << program << " --simulate T [--json | --segments K] [--permutation P] -n N seed\n"
               << "  -n N,N,...  universe sizes (default " << DEFAULT_NS << ")\n"
               << "  -j THREADS  threads (default: one per core)\n"
               << "  --out DIR   directory holding the runs (default " << DEFAULT_OUT << "); the CSVs go to\n"
               << "              DIR/<run>, run = 1, 2, ... the next unused number\n"
               << "  --validate  check the search against trying every k, and the segment\n"
               << "              sizes against the brute-force O'Rourke; writes no files\n"
-              << "  --simulate T  the prefix of length T of one n, with the run's seed: doubles\n"
-              << "              delta from 1/2 until no larger delta can lower the cost, and\n"
-              << "              prints every delta tried as CSV (delta,lambda,qc with\n"
+              << "  --simulate T  the prefix of length T of one n, with the run's seed: delta =\n"
+              << "              1/2, 1, 3/2, ... until no larger delta can lower qc, printing\n"
+              << "              every delta tried as CSV (delta,lambda,qc with\n"
               << "              qc = log2 delta + log2 lambda); writes no files\n"
-              << "  --json      with --simulate: JSON with the keys and every delta's segments\n"
+              << "  --json      with --simulate: JSON with the keys, the table and the best\n"
+              << "              delta's segments\n"
+              << "  --segments K  with --simulate: JSON with the segments for k = K (delta = K/2)\n"
+              << "  --permutation P  the insertion order of 1..n (default uniform):\n"
+              << "              uniform     a uniformly random permutation\n"
+              << "              zipf:R,s    R equal key regions, each insert from a region picked\n"
+              << "                          with weight 1/rank^s, hot regions placed at random\n"
+              << "              blocks:b    blocks of b consecutive keys, blocks and keys in\n"
+              << "                          random order\n"
+              << "              probing     linear probing: a random key, or the next free one\n"
+              << "                          above it, wrapping from n to 1\n"
+              << "              --simulate needs the same P as the run it reproduces\n"
               << "  seed        random if omitted\n";
     std::exit(1);
 }
@@ -436,11 +681,13 @@ int main(int argc, char **argv) {
     uint64_t seed = 0;
     size_t simulate_t = 0;  // 0: not simulating
     bool json = false;
+    int64_t segments_k = 0;  // 0: the table, not one k's segments
 
     for (int i = 1; i < argc; ++i) {
         std::string argument = argv[i];
         bool takes_value = argument == "-n" || argument == "-j" || argument == "--out" ||
-                           argument == "--simulate";
+                           argument == "--simulate" || argument == "--segments" ||
+                           argument == "--permutation";
         if (takes_value && i + 1 >= argc) usage(argv[0]);
 
         if (argument == "-n") {
@@ -452,11 +699,19 @@ int main(int argc, char **argv) {
             out_dir = argv[++i];
         } else if (argument == "--validate") {
             validate_only = true;
+        } else if (argument == "--permutation") {
+            if (!parse_order(argv[++i], ORDER)) {
+                std::cerr << "unknown permutation: " << argv[i] << "\n";
+                usage(argv[0]);
+            }
         } else if (argument == "--simulate") {
             simulate_t = size_t(parse_number(argv[++i], argv[0]));
             if (simulate_t < 1) usage(argv[0]);
         } else if (argument == "--json") {
             json = true;
+        } else if (argument == "--segments") {
+            segments_k = int64_t(parse_number(argv[++i], argv[0]));
+            if (segments_k < 1) usage(argv[0]);
         } else if (!has_seed) {
             seed = parse_number(argument, argv[0]);
             has_seed = true;
@@ -471,13 +726,14 @@ int main(int argc, char **argv) {
     // per-n seed as a run: seed + n.
     if (simulate_t) {
         if (!has_seed || validate_only || sizes.size() != 1 || simulate_t > sizes[0]) usage(argv[0]);
-        simulate(sizes[0], simulate_t, seed + sizes[0], json);
+        simulate(sizes[0], simulate_t, seed + sizes[0], json, segments_k);
         return 0;
     }
 
     if (!has_seed) seed = std::random_device{}();
     omp_set_num_threads(threads);
-    std::cout << "seed: " << seed << "  threads: " << threads << std::endl;
+    std::cout << "seed: " << seed << "  threads: " << threads
+              << "  permutation: " << ORDER.spec() << std::endl;
 
     if (validate_only) {
         for (size_t n : sizes) {
@@ -488,6 +744,18 @@ int main(int argc, char **argv) {
 
     out_dir = next_run_dir(out_dir);
     std::cout << "run directory: " << out_dir << std::endl;
+
+    RunMeta meta;
+    meta.path = out_dir + "/meta.json";
+    meta.run = std::stoi(std::filesystem::path(out_dir).filename().string());
+    meta.seed = seed;
+    meta.sizes = sizes;
+    meta.started = utc_now();
+    for (int i = 0; i < argc; ++i) meta.command += (i ? " " : "") + std::string(argv[i]);
+    // A drawn seed is not on the command line; record it so the command reruns
+    // the same permutations.
+    if (!has_seed) meta.command += " " + std::to_string(seed);
+    meta.write();
 
     Progress progress;
     progress.started = std::chrono::steady_clock::now();
@@ -520,8 +788,16 @@ int main(int argc, char **argv) {
             }
         }
 
+        out.close();
         std::cout << "n=" << n << ": " << result.seconds << " s, "
                   << result.mean_evaluations << " k evaluated per prefix on average, "
                   << result.max_evaluations << " at most -> " << path << std::endl;
+
+        meta.timing.push_back({n, result.seconds, result.mean_evaluations, result.max_evaluations});
+        meta.write();
     }
+
+    meta.finished = utc_now();
+    meta.write();
+    std::cout << "metadata -> " << meta.path << std::endl;
 }

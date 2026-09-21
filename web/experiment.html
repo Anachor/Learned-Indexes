@@ -13,21 +13,35 @@
 </header>
 
 <main>
-  <div id="pickers" class="pickers" hidden>
-    <label>
-      <span>Run</span>
-      <select id="run"></select>
-    </label>
-    <label>
-      <span>n</span>
-      <select id="n"></select>
-    </label>
-    <button id="simulate-toggle" type="button" hidden>Simulate</button>
-    <a id="csv" class="csv" hidden>download CSV</a>
+  <nav id="tabs" class="tabs" role="tablist" hidden>
+    <button type="button" role="tab" data-tab="plots" class="active" aria-selected="true">Plots</button>
+    <button type="button" role="tab" data-tab="simulate" aria-selected="false" hidden>Simulate</button>
+  </nav>
+
+  <div id="tab-plots" role="tabpanel">
+    <div id="pickers" class="pickers" hidden>
+      <label>
+        <span>Run</span>
+        <select id="run"></select>
+      </label>
+      <label>
+        <span>n</span>
+        <select id="n"></select>
+      </label>
+      <a id="csv" class="csv" hidden>download CSV</a>
+      <p id="run-meta" class="status"></p>
+    </div>
+
+    <h2 id="n-heading" class="section" hidden></h2>
+    <div id="figures"></div>
   </div>
 
-  <section id="simulation" class="simulation" hidden>
+  <section id="tab-simulate" role="tabpanel" hidden>
     <form id="simulate-form" class="pickers">
+      <label>
+        <span>Run</span>
+        <select id="sim-run"></select>
+      </label>
       <label>
         <span>n</span>
         <input id="sim-n" type="number" min="1" step="1" required>
@@ -40,14 +54,19 @@
       <p id="sim-status" class="status"></p>
     </form>
 
+    <p id="sim-intro" class="status">One prefix of one n, with the run's seed: &delta; = 0.5, 1, 1.5, &hellip;
+      until no larger &delta; can lower qc = log&#8322;&delta; + log&#8322;&lambda;.</p>
+
     <div id="sim-result" hidden>
       <p id="sim-summary" class="status"></p>
+      <div class="table-wrap">
       <table id="sim-table" class="deltas">
         <thead>
           <tr><th>&delta;</th><th>&lambda;</th><th>qc = log&#8322;&delta; + log&#8322;&lambda;</th></tr>
         </thead>
         <tbody></tbody>
       </table>
+      </div>
       <p id="sim-stop" class="status"></p>
       <p class="status">Same table from the command line: <code id="sim-command"></code></p>
 
@@ -58,9 +77,6 @@
       <canvas id="sim-plot" class="plot"></canvas>
     </div>
   </section>
-
-  <h2 id="n-heading" class="section" hidden></h2>
-  <div id="figures"></div>
 </main>
 
 <script src="/simulate.js"></script>

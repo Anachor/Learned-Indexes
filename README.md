@@ -41,12 +41,36 @@ on a sorted array: for every prefix of a random permutation of {1..n}, the best
 delta (1a) and a set of fixed deltas (1b).
 
 - **Run**: writes one CSV per n to `results/exp1/<run>/` (run = 1, 2, ..., the next unused number; the folder is created), with a row per delta evaluated
-  (`seed,n,t,k,L,cost,fixed,best`, k = 2 delta).
+  (`seed,n,t,k,L,cost,fixed,best`, k = 2 delta, cost = log2(delta) + log2(lambda)).
+  Runs before this change wrote cost as log2(2 delta) + log2(lambda), 1 more; the plot
+  script recomputes it from k and L, so it handles both.
+
+  Each run also gets `meta.json`: the seed (n uses seed + n), permutation, ns,
+  fixed deltas, cost definition, the commit exp1 was built from and whether that
+  code had uncommitted changes, the command line, start and finish times, and
+  per-n timing. `status` is `running` until the run finishes, so a stopped run
+  stays marked as partial. Build with `build.sh` to record the commit - a plain
+  g++ build records it as `unknown`. Run 1 predates this; its `meta.json` was
+  written afterwards from its CSVs.
 
     ```
-    g++ -std=c++17 -O2 -fopenmp experiments/exp1/exp1.cpp -o experiments/exp1/exp1
-    ./experiments/exp1/exp1 [-n N,N,...] [-j THREADS] [--out DIR] [seed]
+    experiments/exp1/build.sh           # CXX=... to pick the compiler (default g++-11 if present)
+    ./experiments/exp1/exp1 [-n N,N,...] [-j THREADS] [--out DIR] [--permutation P] [seed]
     ```
+
+  `--permutation` picks the insertion order of 1..n (recorded in `meta.json`):
+
+  | P | order | optimal lambda |
+  |---|---|---|
+  | `uniform` (default) | uniformly random | 1 on ~95% of prefixes |
+  | `zipf:R,s` | R equal key regions; each insert from a region picked with weight 1/rank^s, hot regions placed at random | > 1 on ~99% (R=16, s=1), delta ~2-8 |
+  | `blocks:b` | blocks of b consecutive keys, blocks and keys in random order | > 1, but delta stuck at 0.5 |
+  | `probing` | linear probing: a random key, or the next free one above it, wrapping | 1 on ~90-97%, like uniform |
+
+  Uniform prefixes are random subsets: their deviation from a line grows like
+  sqrt(length), so splitting into lambda pieces lowers delta only by sqrt(lambda)
+  and one segment wins. Orders that vary the key density along the prefix -
+  zipf - make splitting pay. Measured at n = 1024, 4096, 16384.
 
 - **Plot**: reads those CSVs, writes `query_complexity.png`, `segments.png` and `best_delta.png` for each n to `figures/exp1/<run>/n<N>/`. Uses the latest run unless `--run N` is given.
 
@@ -62,12 +86,13 @@ delta (1a) and a set of fixed deltas (1b).
     ```
 
 - **Simulate** one prefix (writes nothing): the prefix of length T of n, with a
-  run's seed, for delta = 1/2, 1, 2, ... until no larger delta can lower
+  run's seed, for delta = 1/2, 1, 3/2, ... until no larger delta can lower
   qc = log2(delta) + log2(lambda). Prints `delta,lambda,qc`; `--json` adds the keys
-  and every delta's segments. The results server has a button for it.
+  and the best delta's segments, `--segments K` prints only the segments for k = K
+  (delta = K/2). The results server's Simulate tab runs it.
 
     ```
-    ./experiments/exp1/exp1 --simulate T [--json] -n N seed
+    ./experiments/exp1/exp1 --simulate T [--json | --segments K] [--permutation P] -n N seed
     ```
 
 ## Results server
@@ -81,13 +106,16 @@ python3 web/serve.py [--port N] [--root DIR]
 ```
 
 Then open `http://localhost:8000/`. The selection is kept in the URL
-(`/exp/exp1#run=1&n=1024`), so a particular view can be linked.
+(`/exp/exp1#run=1&n=1024`, plus `&tab=simulate` on the Simulate tab), so a particular
+view can be linked.
 
 It generates nothing - run the plot script first, and if a run has no figures the
-page says which command to run. The one exception is **Simulate**, shown when
-`experiments/<exp>/<exp>` is built: it runs `--simulate` on a chosen n and prefix
-length (default: the n on screen and half of it) with the run's seed, read from
-its CSVs, and shows the table and a plot of the segments. Figures are re-read on every request, so
+page says which command to run. The one exception is the **Simulate** tab, shown when
+`experiments/<exp>/<exp>` is built: it runs `--simulate` on a chosen run, n and
+prefix length (default: the run and n open on the Plots tab, and half of n) with
+the run's seed and permutation, read from its `meta.json` (the seed from its CSVs
+for runs without one), and shows the table and a plot of the
+segments. The figures are on the **Plots** tab. Figures are re-read on every request, so
 re-plotting and reloading the page is enough to see new output.
 
 To keep it running as a systemd user service (restarts on failure, keeps running

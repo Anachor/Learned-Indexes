@@ -11,8 +11,11 @@ const nPicker = document.getElementById("n");
 const csvLink = document.getElementById("csv");
 const panel = document.getElementById("figures");
 const nHeading = document.getElementById("n-heading");
+const runMetaLine = document.getElementById("run-meta");
 
 let data = null;
+let tab = "plots";        // the open tab: "plots" or "simulate"
+let simulation = null;    // setupSimulate's handle, when the experiment has one
 
 document.title = name + " - results";
 title.textContent = name;
@@ -30,7 +33,7 @@ function readHash() {
 }
 
 function writeHash(run, n) {
-  const hash = "#run=" + run + (n === null ? "" : "&n=" + n);
+  const hash = "#run=" + run + (n === null ? "" : "&n=" + n) + (tab === "plots" ? "" : "&tab=" + tab);
   if (hash !== location.hash) history.replaceState(null, "", hash);
 }
 
@@ -71,6 +74,58 @@ function choices(run) {
   return list;
 }
 
+// -- run metadata ----------------------------------------------------------
+
+function runMeta(run) {
+  return (data.meta || {})[run] || null;
+}
+
+// "3 · a1b2c3", with * when the code had uncommitted changes. Just the number
+// for runs without a known commit.
+function runChoices() {
+  return data.runs.map((run) => {
+    const meta = runMeta(run);
+    const commit = meta && meta.commit && meta.commit !== "unknown" ? meta.commit : null;
+    return [String(run), commit ? run + " · " + commit + (meta.dirty ? "*" : "") : String(run)];
+  });
+}
+
+function pretty(formula) {
+  return formula.replace(/delta/g, "δ").replace(/lambda/g, "λ");
+}
+
+// One line under the pickers saying what the run is, and a warning when it
+// did not finish - its CSVs may then be missing or cut short.
+function renderRunMeta(run) {
+  const meta = runMeta(run);
+  runMetaLine.textContent = "";
+  runMetaLine.className = "status";
+  if (!meta) {
+    runMetaLine.textContent = "No meta.json for this run.";
+    return;
+  }
+
+  const parts = [];
+  if (meta.seed !== undefined && meta.seed !== null) parts.push("seed " + meta.seed);
+  if (meta.permutation) parts.push("permutation " + meta.permutation);
+  if (meta.commit) {
+    parts.push("commit " + meta.commit + (meta.dirty ? " (uncommitted changes)" : ""));
+  }
+  if (meta.started) parts.push(meta.started.replace("T", " ").replace("Z", " UTC"));
+  if (meta.cost) parts.push("cost " + pretty(meta.cost));
+  runMetaLine.textContent = parts.join(" · ") + " · ";
+
+  const link = document.createElement("a");
+  link.href = "/results/" + encodeURIComponent(name) + "/" + run + "/meta.json";
+  link.textContent = "meta.json";
+  runMetaLine.appendChild(link);
+
+  if (meta.status && meta.status !== "complete") {
+    runMetaLine.classList.add("incomplete");
+    runMetaLine.prepend("Run " + meta.status + ", not complete: its results may be partial. ");
+  }
+}
+
 function message(text, command) {
   panel.textContent = "";
   const box = document.createElement("p");
@@ -105,6 +160,7 @@ function figureElement(image) {
 function render() {
   const run = runPicker.value;
   const available = choices(run);
+  renderRunMeta(run);
 
   if (!available.length) {
     nPicker.textContent = "";
@@ -144,6 +200,26 @@ function render() {
   }
 }
 
+// -- tabs ------------------------------------------------------------------
+
+const tabs = document.getElementById("tabs");
+
+function showTab(which) {
+  tab = which;
+  for (const button of tabs.querySelectorAll("[data-tab]")) {
+    const active = button.dataset.tab === which;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    document.getElementById("tab-" + button.dataset.tab).hidden = !active;
+  }
+  writeHash(runPicker.value, nPicker.value || null);
+  if (which === "simulate") simulation.shown();
+}
+
+for (const button of tabs.querySelectorAll("[data-tab]")) {
+  button.addEventListener("click", () => showTab(button.dataset.tab));
+}
+
 runPicker.addEventListener("change", render);
 nPicker.addEventListener("change", render);
 
@@ -172,13 +248,19 @@ fetch("/api/experiments/" + encodeURIComponent(name))
     const run = data.runs.includes(Number(hash.run)) ? Number(hash.run) : data.runs[0];
 
     pickers.hidden = false;
-    fill(runPicker, data.runs, run);
-    if (data.simulate) setupSimulate(name);
+    fill(runPicker, runChoices(), run);
+    // The tab bar only when there is a second tab to switch to.
+    if (data.simulate) {
+      simulation = setupSimulate(name, data.runs);
+      tabs.querySelector('[data-tab="simulate"]').hidden = false;
+      tabs.hidden = false;
+    }
 
     const available = choices(run);
     if (available.some(([value]) => value === hash.n)) {
       fill(nPicker, available, hash.n);
     }
     render();
+    if (hash.tab === "simulate" && simulation) showTab("simulate");
   })
   .catch((error) => message("Could not load " + name + ": " + error.message));

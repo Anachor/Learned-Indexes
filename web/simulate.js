@@ -1,13 +1,13 @@
 // Simulate: one prefix of one n, with the run's seed. The server runs the
-// experiment's program, which doubles delta from 1/2 until no larger delta can
-// lower qc = log2(delta) + log2(lambda), and sends back every delta it tried
-// with its segments. This file shows them as a table and draws the segments.
+// experiment's program, which steps delta = 1/2, 1, 3/2, ... until no larger
+// delta can lower qc = log2(delta) + log2(lambda), and sends back the table and
+// the best delta's segments. This file shows the table and draws the segments,
+// fetching another delta's when its row is picked.
 //
-// app.js calls setupSimulate once the experiment has loaded.
+// It lives on the Simulate tab. app.js calls setupSimulate once the experiment
+// has loaded, and the returned shown() each time the tab is opened.
 
-function setupSimulate(experiment) {
-  const toggle = document.getElementById("simulate-toggle");
-  const section = document.getElementById("simulation");
+function setupSimulate(experiment, runs) {
   const form = document.getElementById("simulate-form");
   const nInput = document.getElementById("sim-n");
   const tInput = document.getElementById("sim-t");
@@ -19,12 +19,14 @@ function setupSimulate(experiment) {
   const command = document.getElementById("sim-command");
   const plotHeading = document.getElementById("plot-heading");
   const canvas = document.getElementById("sim-plot");
-  const runPicker = document.getElementById("run");
+  const intro = document.getElementById("sim-intro");
+  const simRun = document.getElementById("sim-run");
+  const runPicker = document.getElementById("run");  // on the Plots tab
   const nPicker = document.getElementById("n");
 
-  toggle.hidden = false;
+  for (const run of runs) simRun.appendChild(new Option(run, run));
 
-  // -- defaults: the n on screen, and half of it --------------------------
+  // -- defaults: the run and n open on the Plots tab, and half of that n --
 
   let tEdited = false;  // once t is typed in, changing n leaves it alone
 
@@ -40,19 +42,12 @@ function setupSimulate(experiment) {
   }
 
   function prefill() {
+    simRun.value = runPicker.value;
     nInput.value = currentN();
     tInput.value = defaultT();
     tEdited = false;
   }
 
-  toggle.addEventListener("click", () => {
-    section.hidden = !section.hidden;
-    toggle.classList.toggle("active", !section.hidden);
-    if (!section.hidden && !nInput.value) prefill();
-  });
-  nPicker.addEventListener("change", () => {
-    if (!section.hidden) prefill();
-  });
   nInput.addEventListener("input", () => {
     if (!tEdited) tInput.value = defaultT();
   });
@@ -64,6 +59,7 @@ function setupSimulate(experiment) {
 
   let data = null;      // the last simulation
   let selected = 0;     // index into data.deltas of the delta drawn
+  let segments = {};    // k -> that delta's segments, as fetched
   let view = null;      // [lowest key, highest key] shown, or null for all
 
   form.addEventListener("submit", (event) => {
@@ -78,7 +74,7 @@ function setupSimulate(experiment) {
     const button = form.querySelector("button");
     button.disabled = true;
     status.textContent = "Running…";
-    const query = "?run=" + runPicker.value + "&n=" + n + "&t=" + t;
+    const query = "?run=" + simRun.value + "&n=" + n + "&t=" + t;
     fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
       .then((response) => response.json().then((payload) => {
         if (!response.ok) throw new Error(payload.error || response.statusText);
@@ -109,7 +105,7 @@ function setupSimulate(experiment) {
   }
 
   function formatDelta(delta) {
-    return delta === 0.5 ? "1/2" : delta.toLocaleString("en-US");
+    return delta.toLocaleString("en-US");
   }
 
   function show(payload) {
@@ -118,6 +114,7 @@ function setupSimulate(experiment) {
     const winner = data.deltas[best];
     selected = best;
     view = null;
+    segments = { [data.best_k]: data.segments };
 
     summary.textContent =
       "run " + data.run + " · seed " + data.seed +
@@ -136,33 +133,61 @@ function setupSimulate(experiment) {
         td.textContent = text;
         tr.appendChild(td);
       }
-      tr.addEventListener("click", () => {
-        selected = i;
-        markSelected();
-        draw();
-      });
+      tr.addEventListener("click", () => pick(i));
       body.appendChild(tr);
     });
 
-    // Why the doubling stopped: lambda >= 1, so qc >= log2(delta) for every
+    // Why the search stopped: lambda >= 1, so qc >= log2(delta) for every
     // larger delta, and at the next delta that already reaches the best.
-    const last = data.deltas[data.deltas.length - 1].delta;
+    const next = data.deltas[data.deltas.length - 1].delta + 0.5;
     stop.textContent =
-      "Stopped after δ = " + formatDelta(last) + ": every δ ≥ " + formatDelta(2 * last) +
-      " has qc ≥ log₂δ ≥ " + Math.log2(2 * last).toFixed(3) +
+      data.deltas.length + " values of δ tried, stopped after δ = " + formatDelta(next - 0.5) +
+      ": every δ ≥ " + formatDelta(next) + " has qc ≥ log₂δ ≥ " + Math.log2(next).toFixed(3) +
       ", no lower than the best, " + winner.qc.toFixed(3) + ".";
     command.textContent = data.command;
 
     result.hidden = false;
+    intro.hidden = true;
     markSelected();
     draw();
+
+    // Bring the best row into view in the scrolling table, not the page.
+    const wrap = body.closest(".table-wrap");
+    const row = body.rows[best];
+    wrap.scrollTop = row.offsetTop - wrap.clientHeight / 2;
+  }
+
+  // Draws another delta, fetching its segments the first time.
+  function pick(i) {
+    selected = i;
+    markSelected();
+    const k = data.deltas[i].k;
+    if (segments[k]) return draw();
+
+    draw();  // the points, until the segments arrive
+    const asked = data;
+    const query = "?run=" + data.run + "&n=" + data.n + "&t=" + data.t + "&k=" + k;
+    fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
+      .then((response) => response.json().then((payload) => {
+        if (!response.ok) throw new Error(payload.error || response.statusText);
+        return payload;
+      }))
+      .then((payload) => {
+        if (asked !== data) return;  // a new simulation has replaced this one
+        segments[k] = payload.segments;
+        markSelected();
+        draw();
+      })
+      .catch((error) => {
+        if (asked === data) plotHeading.textContent += " — could not load: " + error.message;
+      });
   }
 
   function markSelected() {
     [...body.rows].forEach((tr, i) => tr.classList.toggle("selected", i === selected));
     const row = data.deltas[selected];
     plotHeading.textContent = "δ = " + formatDelta(row.delta) + ", λ = " +
-      row.lambda.toLocaleString("en-US") + " segments";
+      row.lambda.toLocaleString("en-US") + " segments" + (segments[row.k] ? "" : " — loading…");
   }
 
   // -- plot -----------------------------------------------------------------
@@ -283,7 +308,7 @@ function setupSimulate(experiment) {
     // Segments in view: the band first, the points over it, the line on top.
     // Neighbouring segments alternate colours so the boundaries show.
     const visible = [];
-    row.segments.forEach(([begin, end, lx0, ly0, slope], s) => {
+    (segments[row.k] || []).forEach(([begin, end, lx0, ly0, slope], s) => {
       const from = Math.max(keys[begin], g.x0);
       const to = Math.min(keys[end - 1], g.x1);
       if (from > to) return;
@@ -381,4 +406,13 @@ function setupSimulate(experiment) {
 
   new ResizeObserver(draw).observe(canvas);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+
+  // Until the first simulation, opening the tab follows what the Plots tab
+  // shows; after that it keeps the inputs as they were.
+  return {
+    shown() {
+      if (!data) prefill();
+      draw();
+    },
+  };
 }
