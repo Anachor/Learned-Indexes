@@ -44,10 +44,8 @@
       </label>
       <label>
         <span>n</span>
-        <span class="n-pair">
-          <select id="sim-n-pick" aria-label="n from the run"></select>
-          <input id="sim-n" type="number" min="1" step="1" required aria-label="n">
-        </span>
+        <input id="sim-n" type="text" inputmode="numeric" list="sim-n-values" autocomplete="off" required>
+        <datalist id="sim-n-values"></datalist>
       </label>
       <button id="sim-simulate" type="button"
         title="Play the best segments for t = n/8, n/4, ..., n">Simulate</button>

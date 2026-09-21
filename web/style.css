@@ -378,7 +378,14 @@ code {
   font-size: 13px;
 }
 
-/* n on the Simulate tab: the run's values beside a box for any other */
-.n-pair { display: flex; gap: 6px; }
-.n-pair select { min-width: 110px; }
-.n-pair input { width: 120px; }
+/* n on the Simulate tab: a text field with the run's n values as suggestions */
+#sim-n {
+  width: 150px;
+  padding: 7px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}

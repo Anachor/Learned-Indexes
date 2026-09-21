@@ -27,34 +27,22 @@ function setupSimulate(experiment, runs, sizes) {
   const simRun = document.getElementById("sim-run");
   const runPicker = document.getElementById("run");  // on the Plots tab
   const nPicker = document.getElementById("n");
-  const nPick = document.getElementById("sim-n-pick");
+  const nValues = document.getElementById("sim-n-values");
   const simulateButton = document.getElementById("sim-simulate");
   const inspectButton = document.getElementById("sim-inspect");
 
-  for (const run of runs) simRun.appendChild(new Option(run, run));
+  // runs: [value, label] pairs, labelled as on the Plots tab ("2 · zipf:16,1").
+  for (const [run, label] of runs) simRun.appendChild(new Option(label, run));
 
   // -- defaults: the run and n open on the Plots tab; t left empty -----------
 
-  // n: a dropdown of the run's n values beside a box for any n. Picking one
-  // fills the box; typing another n sets the dropdown to "other".
+  // n: one field, typed into or picked from the run's n values (the browser's
+  // suggestion list, filtered by what is typed).
   function offerSizes() {
-    nPick.textContent = "";
-    for (const n of (sizes || {})[simRun.value] || []) nPick.appendChild(new Option(n.toLocaleString("en-US"), n));
-    nPick.appendChild(new Option("other", ""));
-    matchPick();
+    nValues.textContent = "";
+    for (const n of (sizes || {})[simRun.value] || []) nValues.appendChild(new Option(n.toLocaleString("en-US"), n));
   }
-
-  function matchPick() {
-    const known = [...nPick.options].some((o) => o.value !== "" && o.value === nInput.value);
-    nPick.value = known ? nInput.value : "";
-  }
-
   simRun.addEventListener("change", offerSizes);
-  nPick.addEventListener("change", () => {
-    if (nPick.value === "") return nInput.focus();
-    nInput.value = nPick.value;
-  });
-  nInput.addEventListener("input", matchPick);
 
   function currentN() {
     // The n picker may be on "Across n"; then the smallest n it offers.

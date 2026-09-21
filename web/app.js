@@ -315,7 +315,7 @@ fetch("/api/experiments/" + encodeURIComponent(name))
         const found = new Set([...Object.keys(data.figures[r] || {}), ...Object.keys(data.tables[r] || {})]);
         runSizes[r] = [...found].map(Number).sort((a, b) => a - b);
       }
-      simulation = setupSimulate(name, data.runs, runSizes);
+      simulation = setupSimulate(name, runChoices(), runSizes);
       tabs.querySelector('[data-tab="simulate"]').hidden = false;
       tabs.hidden = false;
     }
