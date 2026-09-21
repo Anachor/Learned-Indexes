@@ -309,7 +309,13 @@ fetch("/api/experiments/" + encodeURIComponent(name))
     fill(runPicker, runChoices(), run);
     // The tab bar only when there is a second tab to switch to.
     if (data.simulate) {
-      simulation = setupSimulate(name, data.runs);
+      // Each run's n values, from its figures and CSVs, for the Simulate n box.
+      const runSizes = {};
+      for (const r of data.runs) {
+        const found = new Set([...Object.keys(data.figures[r] || {}), ...Object.keys(data.tables[r] || {})]);
+        runSizes[r] = [...found].map(Number).sort((a, b) => a - b);
+      }
+      simulation = setupSimulate(name, data.runs, runSizes);
       tabs.querySelector('[data-tab="simulate"]').hidden = false;
       tabs.hidden = false;
     }

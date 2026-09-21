@@ -44,8 +44,10 @@
       </label>
       <label>
         <span>n</span>
-        <input id="sim-n" type="text" inputmode="numeric" list="sim-n-values" autocomplete="off" required>
-        <datalist id="sim-n-values"></datalist>
+        <span class="n-pair">
+          <select id="sim-n-pick" aria-label="n from the run"></select>
+          <input id="sim-n" type="number" min="1" step="1" required aria-label="n">
+        </span>
       </label>
       <button id="sim-simulate" type="button"
         title="Play the best segments for t = n/8, n/4, ..., n">Simulate</button>
@@ -80,6 +82,9 @@
       <p class="status">Keys against rank, with each segment's line and its &plusmn;&delta; band.
         Drag across the plot to zoom in on a range of keys, double-click to zoom out.
         Click a row of the table to draw that &delta;.</p>
+      <div class="player-controls">
+        <button class="segments-toggle" type="button" aria-pressed="false">Hide segments</button>
+      </div>
       <canvas id="sim-plot" class="plot"></canvas>
     </div>
 
@@ -91,6 +96,7 @@
         <button id="player-play" type="button">Pause</button>
         <input id="player-frame" type="range" min="0" max="7" step="1" value="0" aria-label="prefix">
         <button id="player-open" type="button" disabled>Inspect this prefix</button>
+        <button class="segments-toggle" type="button" aria-pressed="false">Hide segments</button>
       </div>
       <p id="player-label" class="player-label"></p>
       <canvas id="player-plot" class="plot"></canvas>

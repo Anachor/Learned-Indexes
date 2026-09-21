@@ -377,3 +377,8 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
+
+/* n on the Simulate tab: the run's values beside a box for any other */
+.n-pair { display: flex; gap: 6px; }
+.n-pair select { min-width: 110px; }
+.n-pair input { width: 120px; }

@@ -1,13 +1,17 @@
-// Simulate: one prefix of one n, with the run's seed. The server runs the
-// experiment's program, which steps delta = 1/2, 1, 3/2, ... until no larger
-// delta can lower qc = log2(delta) + log2(lambda), and sends back the table and
-// the best delta's segments. This file shows the table and draws the segments,
-// fetching another delta's when its row is picked.
+// Simulate tab, with the run's seed and permutation. Two actions, both run by
+// the server with the experiment's program:
 //
-// It lives on the Simulate tab. app.js calls setupSimulate once the experiment
-// has loaded, and the returned shown() each time the tab is opened.
+//   Simulate        plays the best delta's segments for t = n/8, n/4, ..., n
+//   Inspect prefix  one prefix length t: delta = 1/2, 1, 3/2, ... until no larger
+//                   delta can lower qc = log2(delta) + log2(lambda); the table,
+//                   and the segments of whichever delta is picked
+//
+// Nothing runs until one of the buttons is pressed. app.js calls setupSimulate
+// once the experiment has loaded, and the returned shown() each time the tab
+// is opened.
 
-function setupSimulate(experiment, runs) {
+// sizes: the n values each run has data for, offered in the n box.
+function setupSimulate(experiment, runs, sizes) {
   const form = document.getElementById("simulate-form");
   const nInput = document.getElementById("sim-n");
   const tInput = document.getElementById("sim-t");
@@ -23,12 +27,34 @@ function setupSimulate(experiment, runs) {
   const simRun = document.getElementById("sim-run");
   const runPicker = document.getElementById("run");  // on the Plots tab
   const nPicker = document.getElementById("n");
+  const nPick = document.getElementById("sim-n-pick");
+  const simulateButton = document.getElementById("sim-simulate");
+  const inspectButton = document.getElementById("sim-inspect");
 
   for (const run of runs) simRun.appendChild(new Option(run, run));
 
-  // -- defaults: the run and n open on the Plots tab, and half of that n --
+  // -- defaults: the run and n open on the Plots tab; t left empty -----------
 
-  let tEdited = false;  // once t is typed in, changing n leaves it alone
+  // n: a dropdown of the run's n values beside a box for any n. Picking one
+  // fills the box; typing another n sets the dropdown to "other".
+  function offerSizes() {
+    nPick.textContent = "";
+    for (const n of (sizes || {})[simRun.value] || []) nPick.appendChild(new Option(n.toLocaleString("en-US"), n));
+    nPick.appendChild(new Option("other", ""));
+    matchPick();
+  }
+
+  function matchPick() {
+    const known = [...nPick.options].some((o) => o.value !== "" && o.value === nInput.value);
+    nPick.value = known ? nInput.value : "";
+  }
+
+  simRun.addEventListener("change", offerSizes);
+  nPick.addEventListener("change", () => {
+    if (nPick.value === "") return nInput.focus();
+    nInput.value = nPick.value;
+  });
+  nInput.addEventListener("input", matchPick);
 
   function currentN() {
     // The n picker may be on "Across n"; then the smallest n it offers.
@@ -37,23 +63,21 @@ function setupSimulate(experiment, runs) {
     return option ? Number(option.value) : 1024;
   }
 
-  function defaultT() {
-    return Math.max(1, Math.floor(Number(nInput.value) / 2));
-  }
-
   function prefill() {
     simRun.value = runPicker.value;
     nInput.value = currentN();
-    tInput.value = defaultT();
-    tEdited = false;
+    offerSizes();
   }
 
-  nInput.addEventListener("input", () => {
-    if (!tEdited) tInput.value = defaultT();
-  });
-  tInput.addEventListener("input", () => {
-    tEdited = true;
-  });
+  // The n in the box, or null (with a message) when it is not a whole number.
+  function readN() {
+    const text = nInput.value.replace(/[,\s_]/g, "");
+    if (!/^\d+$/.test(text) || Number(text) < 1) {
+      status.textContent = "n must be a whole number, at least 1.";
+      return null;
+    }
+    return Number(text);
+  }
 
   // -- running ----------------------------------------------------------------
 
@@ -62,8 +86,8 @@ function setupSimulate(experiment, runs) {
   let segments = {};    // k -> that delta's segments, as fetched
   let view = null;      // [lowest key, highest key] shown, or null for all
 
-  // Every simulation asked for, by "run:n:t": the default view's prefixes and
-  // Run share it, so nothing is fetched twice. Failures are dropped from it so
+  // Every simulation asked for, by "run:n:t": Simulate's prefixes and Inspect
+  // prefix share it, so nothing is fetched twice. Failures are dropped from it so
   // they can be retried.
   const cache = new Map();
 
@@ -82,30 +106,43 @@ function setupSimulate(experiment, runs) {
     return cache.get(key);
   }
 
+  // Inspect prefix: the form's submit, so Enter in the t box does it too.
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const n = Number(nInput.value);
+    const n = readN();
+    if (n === null) return;
+    if (tInput.value === "") {
+      status.textContent = "Enter a prefix length t, 1 to " + n.toLocaleString("en-US") + ".";
+      tInput.focus();
+      return;
+    }
     const t = Number(tInput.value);
-    if (!(t >= 1 && t <= n)) {
-      status.textContent = "t must be between 1 and n.";
+    if (!(Number.isInteger(t) && t >= 1 && t <= n)) {
+      status.textContent = "t must be a whole number from 1 to n.";
       return;
     }
 
-    const button = form.querySelector("button");
-    button.disabled = true;
+    inspectButton.disabled = true;
     status.textContent = "Running…";
     simulation(simRun.value, n, t)
       .then((payload) => {
         status.textContent = "";
         show(payload);
-        loadPlayer(false);  // a new run or n gets its own default view
       })
       .catch((error) => {
         status.textContent = "Simulation failed: " + error.message;
       })
       .finally(() => {
-        button.disabled = false;
+        inspectButton.disabled = false;
       });
+  });
+
+  simulateButton.addEventListener("click", () => {
+    const n = readN();
+    if (n === null) return;
+    status.textContent = "";
+    loadPlayer(n);
+    player.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 
   // -- table --------------------------------------------------------------
@@ -267,11 +304,28 @@ function setupSimulate(experiment, runs) {
     return geometryFor(canvas, data.keys, data.deltas[selected].delta, view, MARGIN);
   }
 
+  // Hide segments: one setting for both plots, so the keys alone can be seen.
+  let segmentsShown = true;
+  const segmentToggles = document.querySelectorAll(".segments-toggle");
+  for (const button of segmentToggles) {
+    button.addEventListener("click", () => {
+      segmentsShown = !segmentsShown;
+      for (const b of segmentToggles) {
+        b.textContent = segmentsShown ? "Hide segments" : "Show segments";
+        b.setAttribute("aria-pressed", String(!segmentsShown));
+        b.classList.toggle("active", !segmentsShown);
+      }
+      draw();
+      drawFrame();
+    });
+  }
+
   // The main plot: the selected delta of the last simulation.
   function draw() {
     if (!data || result.hidden) return;
     const row = data.deltas[selected];
-    render(canvas, data.keys, segments[row.k] || [], row.delta, view, MARGIN, drag);
+    const segs = segmentsShown ? segments[row.k] || [] : [];
+    render(canvas, data.keys, segs, row.delta, view, MARGIN, drag);
   }
 
   // Draws keys against rank on one canvas, with each segment's line and its
@@ -429,12 +483,12 @@ function setupSimulate(experiment, runs) {
     draw();
   });
 
-  // -- default view: the optimal segments as the prefix grows -----------------
+  // -- Simulate: the optimal segments as the prefix grows ---------------------
   //
-  // Without pressing Run, the tab plays t = n/8, n/4, ..., n for the run and n
-  // in the form: one plot, stepping through the prefixes, the keys and the best
-  // delta's segments redrawn at each. Every simulation is cached, so replaying,
-  // scrubbing and Reset do not ask the server again.
+  // Plays t = n/8, n/4, ..., n for the run and n in the form: one plot, stepping
+  // through the prefixes, the keys and the best delta's segments redrawn at
+  // each. Every simulation is cached, so replaying and scrubbing do not ask the
+  // server again.
 
   const player = document.getElementById("sim-player");
   const playerHeading = document.getElementById("player-heading");
@@ -443,7 +497,6 @@ function setupSimulate(experiment, runs) {
   const frameLabel = document.getElementById("player-label");
   const openButton = document.getElementById("player-open");
   const playerCanvas = document.getElementById("player-plot");
-  const resetButton = document.getElementById("sim-reset");
   const PLAYER_MARGIN = { left: 92, right: 16, top: 12, bottom: 40 };
   const FRAME_MS = 1400;
 
@@ -482,7 +535,8 @@ function setupSimulate(experiment, runs) {
       ", λ = " + winner.lambda.toLocaleString("en-US") + ", qc = " + winner.qc.toFixed(3);
     openButton.disabled = false;
     // Keys across 1..n in every frame, so the prefix is seen filling in.
-    render(playerCanvas, frame.sim.keys, frame.sim.segments, winner.delta, [1, playerN], PLAYER_MARGIN, null);
+    const segs = segmentsShown ? frame.sim.segments : [];
+    render(playerCanvas, frame.sim.keys, segs, winner.delta, [1, playerN], PLAYER_MARGIN, null);
   }
 
   function pause() {
@@ -505,14 +559,11 @@ function setupSimulate(experiment, runs) {
     }, FRAME_MS);
   }
 
-  // Loads (from the cache where it can) and plays the default view for the
-  // run and n in the form. force: start again even if it already shows them.
-  function loadPlayer(force) {
+  // Loads (from the cache where it can) and plays, from the start, the
+  // prefixes of n for the run in the form.
+  function loadPlayer(n) {
     const run = simRun.value;
-    const n = Number(nInput.value);
-    if (!(n >= 1)) return;
     const key = run + ":" + n;
-    if (key === playerKey && !force) return;
     playerKey = key;
     playerN = n;
 
@@ -550,21 +601,8 @@ function setupSimulate(experiment, runs) {
     if (!frame || !frame.sim) return;
     pause();
     tInput.value = frame.t;
-    tEdited = true;
     show(frame.sim);
     result.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  // Back to how the tab opens: the run and n on the Plots tab, the single
-  // prefix put away, and the default view playing from the start.
-  resetButton.addEventListener("click", () => {
-    data = null;
-    result.hidden = true;
-    intro.hidden = false;
-    status.textContent = "";
-    prefill();
-    loadPlayer(true);
-    player.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   new ResizeObserver(draw).observe(canvas);
@@ -574,14 +612,12 @@ function setupSimulate(experiment, runs) {
     drawFrame();
   });
 
-  // Until the first simulation, opening the tab follows what the Plots tab
-  // shows; after that it keeps the inputs as they were. The default view
-  // follows the run and n in the form.
+  // Until something has been simulated, opening the tab takes the run and n
+  // the Plots tab shows; after that it keeps the inputs as they were.
   return {
     shown() {
-      if (!data) prefill();
+      if (!data && !playerKey) prefill();
       draw();
-      loadPlayer(false);
       drawFrame();
     },
   };
