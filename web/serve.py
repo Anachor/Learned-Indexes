@@ -26,8 +26,10 @@ ROOT = os.path.dirname(WEB)
 #   flat    figures/<exp>/<run>/<kind>_n<N>.png   (earlier)
 # Discovering rather than hardcoding is what lets the server survive the change.
 BUCKET = re.compile(r"^n(?P<n>\d+)$")
+OVERALL = "overall"  # figures/<exp>/<run>/overall/: the figures across n
 FLAT = re.compile(r"^(?P<kind>.+)_n(?P<n>\d+)\.png$")
 RUN = re.compile(r"^\d+$")
+NUMBERED = re.compile(r"^exp(?P<number>\d+)$")
 
 PAGES = {"index": "index.html", "experiment": "experiment.html"}
 TYPES = {".html": "text/html; charset=utf-8",
@@ -56,6 +58,15 @@ def experiments(root):
     return sorted(names)
 
 
+def label(experiment):
+    """The display name: exp1 is shown as "Experiment 1", anything else as is.
+
+    Only the display changes - URLs and paths keep the directory name.
+    """
+    match = NUMBERED.match(experiment)
+    return f"Experiment {int(match.group('number'))}" if match else experiment
+
+
 def runs(root, experiment):
     """The run numbers for an experiment, newest first."""
     numbers = set()
@@ -64,6 +75,24 @@ def runs(root, experiment):
             if RUN.match(name):
                 numbers.add(int(name))
     return sorted(numbers, reverse=True)
+
+
+def written(path):
+    """Sort key: the order the plot script wrote the files in, then the name."""
+    try:
+        return (os.stat(path).st_mtime, os.path.basename(path))
+    except OSError:
+        return (0, os.path.basename(path))
+
+
+def overall(root, experiment, run):
+    """The run's figures across n, from figures/<exp>/<run>/overall/, in the
+    order they were written."""
+    directory = os.path.join(root, "figures", experiment, str(run), OVERALL)
+    return [{"kind": os.path.splitext(os.path.basename(path))[0],
+             "file": os.path.basename(path),
+             "url": f"/figures/{experiment}/{run}/{OVERALL}/{os.path.basename(path)}"}
+            for path in sorted(glob.glob(os.path.join(directory, "*.png")), key=written)]
 
 
 def figures(root, experiment, run):
@@ -77,12 +106,6 @@ def figures(root, experiment, run):
     """
     directory = os.path.join(root, "figures", experiment, str(run))
     found = {}
-
-    def written(path):
-        try:
-            return (os.stat(path).st_mtime, os.path.basename(path))
-        except OSError:
-            return (0, os.path.basename(path))
 
     # nested: a directory per n, one figure per kind inside it
     for bucket in sorted(subdirectories(directory)):
@@ -131,14 +154,24 @@ def tables(root, experiment, run):
 
 
 def summary(root):
-    """The homepage payload: every experiment with its runs and figure count."""
+    """The homepage payload: every experiment with its runs, the n values it has
+    data for, and its figure count.
+
+    The n values are taken from the CSVs as well as the figures, across every
+    run, so a run that has been computed but not yet plotted still counts.
+    """
     listing = []
     for name in experiments(root):
         numbers = runs(root, name)
-        count = sum(len(images)
-                    for run in numbers
-                    for images in figures(root, name, run).values())
-        listing.append({"name": name, "runs": numbers, "figure_count": count})
+        count = 0
+        sizes = set()
+        for run in numbers:
+            found = figures(root, name, run)
+            count += sum(len(images) for images in found.values())
+            count += len(overall(root, name, run))
+            sizes |= set(found) | set(tables(root, name, run))
+        listing.append({"name": name, "label": label(name), "runs": numbers,
+                        "sizes": sorted(sizes), "figure_count": count})
     return listing
 
 
@@ -151,10 +184,12 @@ def detail(root, experiment):
     numbers = runs(root, experiment)
     return {
         "name": experiment,
+        "label": label(experiment),
         "runs": numbers,
         "figures": {str(run): {str(n): images
                                for n, images in figures(root, experiment, run).items()}
                     for run in numbers},
+        "overall": {str(run): overall(root, experiment, run) for run in numbers},
         "tables": {str(run): {str(n): table
                               for n, table in tables(root, experiment, run).items()}
                    for run in numbers},
@@ -166,14 +201,14 @@ def safe(root, top, experiment, run, name, bucket=None):
 
     The path pieces from the URL are never joined blindly: the experiment must be
     one we discovered, the run must be digits, the optional bucket must look like
-    n<N>, and the file must actually sit in the resulting directory. The realpath
-    check at the end is the backstop.
+    n<N> or be overall/, and the file must actually sit in the resulting
+    directory. The realpath check at the end is the backstop.
     """
     if experiment not in experiments(root):
         return None
     if not RUN.match(run):
         return None
-    if bucket is not None and not BUCKET.match(bucket):
+    if bucket is not None and not (BUCKET.match(bucket) or bucket == OVERALL):
         return None
     if name != os.path.basename(name) or name.startswith("."):
         return None
@@ -310,7 +345,7 @@ def main():
     if found:
         for entry in found:
             numbers = ", ".join(str(run) for run in entry["runs"]) or "none"
-            lines.append(f"  {entry['name']}: runs {numbers} ({entry['figure_count']} figures)")
+            lines.append(f"  {entry['label']}: runs {numbers} ({entry['figure_count']} figures)")
     else:
         lines.append("  no experiments found - is --root correct?")
     lines.append(f"http://localhost:{arguments.port}/")

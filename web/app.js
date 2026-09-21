@@ -10,6 +10,7 @@ const runPicker = document.getElementById("run");
 const nPicker = document.getElementById("n");
 const csvLink = document.getElementById("csv");
 const panel = document.getElementById("figures");
+const nHeading = document.getElementById("n-heading");
 
 let data = null;
 
@@ -35,22 +36,39 @@ function writeHash(run, n) {
 
 // -- pickers ---------------------------------------------------------------
 
-function fill(select, values, chosen) {
+// Each choice is a value, or a [value, label] pair when the text shown differs.
+function fill(select, choices, chosen) {
   select.textContent = "";
-  for (const value of values) {
+  for (const choice of choices) {
+    const [value, label] = Array.isArray(choice) ? choice : [choice, choice];
     const option = document.createElement("option");
     option.value = value;
-    option.textContent = value;
+    option.textContent = label;
     select.appendChild(option);
   }
-  select.value = chosen;
-  select.disabled = values.length === 0;
+  select.value = String(chosen);
+  select.disabled = choices.length === 0;
 }
 
 function sizes(run) {
   return Object.keys(data.figures[run] || {})
     .map(Number)
     .sort((a, b) => a - b);
+}
+
+// The n picker's entries: the figures across n first, when the run has them,
+// then each n. Values are strings, as the select and the URL hash hold them.
+const OVERALL = "overall";
+const OVERALL_LABEL = "Across n";
+
+function overallImages(run) {
+  return (data.overall || {})[run] || [];
+}
+
+function choices(run) {
+  const list = sizes(run).map((n) => [String(n), n.toLocaleString("en-US")]);
+  if (overallImages(run).length) list.unshift([OVERALL, OVERALL_LABEL]);
+  return list;
 }
 
 function message(text, command) {
@@ -68,14 +86,31 @@ function message(text, command) {
 
 // -- rendering -------------------------------------------------------------
 
+function figureElement(image) {
+  const figure = document.createElement("figure");
+
+  const caption = document.createElement("figcaption");
+  caption.textContent = image.kind.replace(/_/g, " ");
+  figure.appendChild(caption);
+
+  const img = document.createElement("img");
+  img.src = image.url;
+  img.alt = image.file;
+  img.loading = "lazy";
+  figure.appendChild(img);
+
+  return figure;
+}
+
 function render() {
   const run = runPicker.value;
-  const available = sizes(run);
+  const available = choices(run);
 
   if (!available.length) {
     nPicker.textContent = "";
     nPicker.disabled = true;
     csvLink.hidden = true;
+    nHeading.hidden = true;
     writeHash(run, null);
     message(
       "No figures for run " + run + ". Generate them with:",
@@ -84,32 +119,22 @@ function render() {
     return;
   }
 
-  // Keep the current n when moving between runs that both have it, so stepping
-  // through runs at a fixed n does not reset the selection.
-  const wanted = Number(nPicker.value);
-  const n = available.includes(wanted) ? wanted : available[0];
+  // Keep the current choice when moving between runs that both have it, so
+  // stepping through runs at a fixed n does not reset the selection.
+  const values = available.map(([value]) => value);
+  const n = values.includes(nPicker.value) ? nPicker.value : values[0];
   fill(nPicker, available, n);
   writeHash(run, n);
 
-  const images = data.figures[run][n] || [];
+  const across = n === OVERALL;
+  nHeading.textContent = across ? OVERALL_LABEL : "n = " + Number(n).toLocaleString("en-US");
+  nHeading.hidden = false;
+
+  const images = across ? overallImages(run) : data.figures[run][n] || [];
   panel.textContent = "";
-  for (const image of images) {
-    const figure = document.createElement("figure");
+  for (const image of images) panel.appendChild(figureElement(image));
 
-    const caption = document.createElement("figcaption");
-    caption.textContent = image.kind.replace(/_/g, " ");
-    figure.appendChild(caption);
-
-    const img = document.createElement("img");
-    img.src = image.url;
-    img.alt = image.file;
-    img.loading = "lazy";
-    figure.appendChild(img);
-
-    panel.appendChild(figure);
-  }
-
-  const table = (data.tables[run] || {})[n];
+  const table = across ? null : (data.tables[run] || {})[n];
   if (table) {
     csvLink.href = table.url;
     csvLink.textContent = "download " + table.file;
@@ -132,8 +157,14 @@ fetch("/api/experiments/" + encodeURIComponent(name))
   .then((payload) => {
     data = payload;
 
+    // The server knows the display name (exp1 -> "Experiment 1"); the URL
+    // only carries the directory name.
+    const label = data.label || name;
+    document.title = label + " - results";
+    title.textContent = label;
+
     if (!data.runs.length) {
-      message("No runs for " + name + " yet.");
+      message("No runs for " + label + " yet.");
       return;
     }
 
@@ -143,9 +174,9 @@ fetch("/api/experiments/" + encodeURIComponent(name))
     pickers.hidden = false;
     fill(runPicker, data.runs, run);
 
-    const available = sizes(run);
-    if (available.includes(Number(hash.n))) {
-      fill(nPicker, available, Number(hash.n));
+    const available = choices(run);
+    if (available.some(([value]) => value === hash.n)) {
+      fill(nPicker, available, hash.n);
     }
     render();
   })

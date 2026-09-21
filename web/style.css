@@ -156,6 +156,11 @@ select:disabled { opacity: 0.5; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+h2.section {
+  margin: 8px 0 16px;
+  font-size: 17px;
+}
+
 figure {
   margin: 0 0 32px;
 }

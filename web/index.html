@@ -19,21 +19,29 @@
 <script>
 const target = document.getElementById("experiments");
 
+// 65536 -> "65,536", so wide ranges stay readable.
+function number(value) {
+  return value.toLocaleString("en-US");
+}
+
 function card(entry) {
-  const latest = entry.runs.length ? entry.runs[0] : null;
+  const sizes = entry.sizes || [];
+  const range = sizes.length === 0 ? "—"
+    : sizes.length === 1 ? "n = " + number(sizes[0])
+    : "n = " + number(sizes[0]) + " – " + number(sizes[sizes.length - 1]);
   const link = document.createElement("a");
   link.className = "card";
   link.href = "/exp/" + encodeURIComponent(entry.name);
 
   const name = document.createElement("h2");
-  name.textContent = entry.name;
+  name.textContent = entry.label || entry.name;
   link.appendChild(name);
 
   const meta = document.createElement("dl");
   const rows = [
     ["runs", entry.runs.length || "none"],
-    ["latest run", latest === null ? "—" : latest],
-    ["figures", entry.figure_count],
+    ["total datapoints", sizes.length],
+    ["range", range],
   ];
   for (const [key, value] of rows) {
     const term = document.createElement("dt");

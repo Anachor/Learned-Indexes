@@ -36,7 +36,7 @@ git submodule update --init
 
 ## Experiment 1
 
-Query complexity, `log2(segment size) + log2(2 delta)`, of a static learned index
+Query complexity, `log2(lambda) + log2(delta)` (lambda = number of segments), of a static learned index
 on a sorted array: for every prefix of a random permutation of {1..n}, the best
 delta (1a) and a set of fixed deltas (1b).
 
