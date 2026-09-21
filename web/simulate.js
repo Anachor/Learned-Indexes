@@ -62,6 +62,26 @@ function setupSimulate(experiment, runs) {
   let segments = {};    // k -> that delta's segments, as fetched
   let view = null;      // [lowest key, highest key] shown, or null for all
 
+  // Every simulation asked for, by "run:n:t": the default view's prefixes and
+  // Run share it, so nothing is fetched twice. Failures are dropped from it so
+  // they can be retried.
+  const cache = new Map();
+
+  function simulation(run, n, t) {
+    const key = run + ":" + n + ":" + t;
+    if (!cache.has(key)) {
+      const query = "?run=" + run + "&n=" + n + "&t=" + t;
+      const request = fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
+        .then((response) => response.json().then((payload) => {
+          if (!response.ok) throw new Error(payload.error || response.statusText);
+          return payload;
+        }));
+      request.catch(() => cache.delete(key));
+      cache.set(key, request);
+    }
+    return cache.get(key);
+  }
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const n = Number(nInput.value);
@@ -74,15 +94,11 @@ function setupSimulate(experiment, runs) {
     const button = form.querySelector("button");
     button.disabled = true;
     status.textContent = "Running…";
-    const query = "?run=" + simRun.value + "&n=" + n + "&t=" + t;
-    fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
-      .then((response) => response.json().then((payload) => {
-        if (!response.ok) throw new Error(payload.error || response.statusText);
-        return payload;
-      }))
+    simulation(simRun.value, n, t)
       .then((payload) => {
         status.textContent = "";
         show(payload);
+        loadPlayer(false);  // a new run or n gets its own default view
       })
       .catch((error) => {
         status.textContent = "Simulation failed: " + error.message;
@@ -220,10 +236,10 @@ function setupSimulate(experiment, runs) {
     return out;
   }
 
-  function geometry() {
-    const keys = data.keys;
-    const delta = data.deltas[selected].delta;
-    let [x0, x1] = view || [keys[0], keys[keys.length - 1]];
+  // Pixel mapping for one canvas: keys across, ranks up, over the key range
+  // shown (all of it when range is null), the ranks widened by the band.
+  function geometryFor(target, keys, delta, range, margin) {
+    let [x0, x1] = range || [keys[0], keys[keys.length - 1]];
     if (x0 === x1) { x0 -= 1; x1 += 1; }
 
     // The ranks of the keys in view, widened by the band.
@@ -235,34 +251,43 @@ function setupSimulate(experiment, runs) {
     y0 -= pad;
     y1 += pad;
 
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    const plotWidth = width - MARGIN.left - MARGIN.right;
-    const plotHeight = height - MARGIN.top - MARGIN.bottom;
+    const width = target.clientWidth;
+    const height = target.clientHeight;
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
     return {
       x0, x1, y0, y1, first, last, width, height, plotWidth, plotHeight,
-      px: (x) => MARGIN.left + (x - x0) / (x1 - x0) * plotWidth,
-      py: (y) => MARGIN.top + (1 - (y - y0) / (y1 - y0)) * plotHeight,
-      key: (px) => x0 + (px - MARGIN.left) / plotWidth * (x1 - x0),
+      px: (x) => margin.left + (x - x0) / (x1 - x0) * plotWidth,
+      py: (y) => margin.top + (1 - (y - y0) / (y1 - y0)) * plotHeight,
+      key: (px) => x0 + (px - margin.left) / plotWidth * (x1 - x0),
     };
   }
 
+  function geometry() {
+    return geometryFor(canvas, data.keys, data.deltas[selected].delta, view, MARGIN);
+  }
+
+  // The main plot: the selected delta of the last simulation.
   function draw() {
     if (!data || result.hidden) return;
+    const row = data.deltas[selected];
+    render(canvas, data.keys, segments[row.k] || [], row.delta, view, MARGIN, drag);
+  }
+
+  // Draws keys against rank on one canvas, with each segment's line and its
+  // +-delta band: the main plot and the overview's small ones alike.
+  function render(target, keys, segs, delta, range, margin, dragBox) {
     const ratio = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
-    const cssHeight = canvas.clientHeight;
+    const cssWidth = target.clientWidth;
+    const cssHeight = target.clientHeight;
     if (!cssWidth) return;
-    canvas.width = Math.round(cssWidth * ratio);
-    canvas.height = Math.round(cssHeight * ratio);
-    const context = canvas.getContext("2d");
+    target.width = Math.round(cssWidth * ratio);
+    target.height = Math.round(cssHeight * ratio);
+    const context = target.getContext("2d");
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, cssWidth, cssHeight);
 
-    const g = geometry();
-    const keys = data.keys;
-    const row = data.deltas[selected];
-    const delta = row.delta;
+    const g = geometryFor(target, keys, delta, range, margin);
     const segmentColours = [colour("--series-1"), colour("--series-2")];
 
     // axes and grid
@@ -275,26 +300,26 @@ function setupSimulate(experiment, runs) {
     for (const x of ticks(g.x0, g.x1, Math.max(2, Math.floor(g.plotWidth / 110)))) {
       const px = Math.round(g.px(x)) + 0.5;
       context.beginPath();
-      context.moveTo(px, MARGIN.top);
-      context.lineTo(px, MARGIN.top + g.plotHeight);
+      context.moveTo(px, margin.top);
+      context.lineTo(px, margin.top + g.plotHeight);
       context.stroke();
-      context.fillText(x.toLocaleString("en-US"), px, MARGIN.top + g.plotHeight + 6);
+      context.fillText(x.toLocaleString("en-US"), px, margin.top + g.plotHeight + 6);
     }
     context.textAlign = "right";
     context.textBaseline = "middle";
     for (const y of ticks(g.y0, g.y1, Math.max(2, Math.floor(g.plotHeight / 60)))) {
       const py = Math.round(g.py(y)) + 0.5;
       context.beginPath();
-      context.moveTo(MARGIN.left, py);
-      context.lineTo(MARGIN.left + g.plotWidth, py);
+      context.moveTo(margin.left, py);
+      context.lineTo(margin.left + g.plotWidth, py);
       context.stroke();
-      context.fillText(y.toLocaleString("en-US"), MARGIN.left - 8, py);
+      context.fillText(y.toLocaleString("en-US"), margin.left - 8, py);
     }
     context.textAlign = "center";
     context.textBaseline = "bottom";
-    context.fillText("key", MARGIN.left + g.plotWidth / 2, g.height - 2);
+    context.fillText("key", margin.left + g.plotWidth / 2, g.height - 2);
     context.save();
-    context.translate(10, MARGIN.top + g.plotHeight / 2);
+    context.translate(10, margin.top + g.plotHeight / 2);
     context.rotate(-Math.PI / 2);
     context.textBaseline = "middle";
     context.fillText("rank", 0, 0);
@@ -302,13 +327,13 @@ function setupSimulate(experiment, runs) {
 
     context.save();
     context.beginPath();
-    context.rect(MARGIN.left, MARGIN.top, g.plotWidth, g.plotHeight);
+    context.rect(margin.left, margin.top, g.plotWidth, g.plotHeight);
     context.clip();
 
     // Segments in view: the band first, the points over it, the line on top.
     // Neighbouring segments alternate colours so the boundaries show.
     const visible = [];
-    (segments[row.k] || []).forEach(([begin, end, lx0, ly0, slope], s) => {
+    segs.forEach(([begin, end, lx0, ly0, slope], s) => {
       const from = Math.max(keys[begin], g.x0);
       const to = Math.min(keys[end - 1], g.x1);
       if (from > to) return;
@@ -356,18 +381,18 @@ function setupSimulate(experiment, runs) {
       context.stroke();
     }
 
-    if (drag) {
-      const [a, b] = drag;
+    if (dragBox) {
+      const [a, b] = dragBox;
       context.fillStyle = colour("--link");
       context.globalAlpha = 0.15;
-      context.fillRect(Math.min(a, b), MARGIN.top, Math.abs(b - a), g.plotHeight);
+      context.fillRect(Math.min(a, b), margin.top, Math.abs(b - a), g.plotHeight);
       context.globalAlpha = 1;
     }
     context.restore();
 
     context.strokeStyle = colour("--border");
     context.lineWidth = 1;
-    context.strokeRect(MARGIN.left + 0.5, MARGIN.top + 0.5, g.plotWidth, g.plotHeight);
+    context.strokeRect(margin.left + 0.5, margin.top + 0.5, g.plotWidth, g.plotHeight);
   }
 
   // -- zoom -------------------------------------------------------------------
@@ -404,15 +429,160 @@ function setupSimulate(experiment, runs) {
     draw();
   });
 
+  // -- default view: the optimal segments as the prefix grows -----------------
+  //
+  // Without pressing Run, the tab plays t = n/8, n/4, ..., n for the run and n
+  // in the form: one plot, stepping through the prefixes, the keys and the best
+  // delta's segments redrawn at each. Every simulation is cached, so replaying,
+  // scrubbing and Reset do not ask the server again.
+
+  const player = document.getElementById("sim-player");
+  const playerHeading = document.getElementById("player-heading");
+  const playButton = document.getElementById("player-play");
+  const frameSlider = document.getElementById("player-frame");
+  const frameLabel = document.getElementById("player-label");
+  const openButton = document.getElementById("player-open");
+  const playerCanvas = document.getElementById("player-plot");
+  const resetButton = document.getElementById("sim-reset");
+  const PLAYER_MARGIN = { left: 92, right: 16, top: 12, bottom: 40 };
+  const FRAME_MS = 1400;
+
+  let frames = [];         // {i, t, sim} per prefix, sim null until loaded
+  let frameIndex = 0;
+  let playerKey = null;    // "run:n" the player shows
+  let playerN = 0;
+  let timer = null;
+
+  // t = i n / 8 for i = 1..8; for n < 8 some coincide, and are shown once.
+  function prefixes(n) {
+    const out = [];
+    for (let i = 1; i <= 8; i++) {
+      const t = Math.max(1, Math.round(i * n / 8));
+      if (!out.some((p) => p.t === t)) out.push({ i, t });
+    }
+    return out;
+  }
+
+  function fraction(i) {
+    return { 1: "n/8", 2: "n/4", 3: "3n/8", 4: "n/2", 5: "5n/8", 6: "3n/4", 7: "7n/8", 8: "n" }[i];
+  }
+
+  function drawFrame() {
+    const frame = frames[frameIndex];
+    if (!frame) return;
+    frameSlider.value = frameIndex;
+    const head = "t = " + fraction(frame.i) + " = " + frame.t.toLocaleString("en-US");
+    if (!frame.sim) {
+      frameLabel.textContent = head + " — loading…";
+      openButton.disabled = true;
+      return;
+    }
+    const winner = frame.sim.deltas[bestIndex(frame.sim.deltas)];
+    frameLabel.textContent = head + " — best δ = " + formatDelta(winner.delta) +
+      ", λ = " + winner.lambda.toLocaleString("en-US") + ", qc = " + winner.qc.toFixed(3);
+    openButton.disabled = false;
+    // Keys across 1..n in every frame, so the prefix is seen filling in.
+    render(playerCanvas, frame.sim.keys, frame.sim.segments, winner.delta, [1, playerN], PLAYER_MARGIN, null);
+  }
+
+  function pause() {
+    clearInterval(timer);
+    timer = null;
+    playButton.textContent = "Play";
+  }
+
+  function play() {
+    if (timer) return;
+    if (frameIndex === frames.length - 1) frameIndex = 0;  // replay from the start
+    playButton.textContent = "Pause";
+    drawFrame();
+    timer = setInterval(() => {
+      // Wait on a frame still loading rather than skip it.
+      if (!frames[frameIndex] || !frames[frameIndex].sim) return;
+      if (frameIndex === frames.length - 1) return pause();
+      frameIndex += 1;
+      drawFrame();
+    }, FRAME_MS);
+  }
+
+  // Loads (from the cache where it can) and plays the default view for the
+  // run and n in the form. force: start again even if it already shows them.
+  function loadPlayer(force) {
+    const run = simRun.value;
+    const n = Number(nInput.value);
+    if (!(n >= 1)) return;
+    const key = run + ":" + n;
+    if (key === playerKey && !force) return;
+    playerKey = key;
+    playerN = n;
+
+    pause();
+    playerHeading.textContent = "Optimal segments as the prefix grows — run " + run +
+      ", n = " + n.toLocaleString("en-US");
+    frames = prefixes(n).map(({ i, t }) => ({ i, t, sim: null }));
+    frameIndex = 0;
+    frameSlider.max = frames.length - 1;
+    player.hidden = false;
+    for (const frame of frames) {
+      simulation(run, n, frame.t)
+        .then((payload) => {
+          if (playerKey !== key) return;  // replaced by another run or n
+          frame.sim = payload;
+          if (frame === frames[frameIndex]) drawFrame();
+        })
+        .catch((error) => {
+          if (playerKey === key && frame === frames[frameIndex]) {
+            frameLabel.textContent += " failed: " + error.message;
+          }
+        });
+    }
+    play();
+  }
+
+  playButton.addEventListener("click", () => (timer ? pause() : play()));
+  frameSlider.addEventListener("input", () => {
+    pause();
+    frameIndex = Number(frameSlider.value);
+    drawFrame();
+  });
+  openButton.addEventListener("click", () => {
+    const frame = frames[frameIndex];
+    if (!frame || !frame.sim) return;
+    pause();
+    tInput.value = frame.t;
+    tEdited = true;
+    show(frame.sim);
+    result.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  // Back to how the tab opens: the run and n on the Plots tab, the single
+  // prefix put away, and the default view playing from the start.
+  resetButton.addEventListener("click", () => {
+    data = null;
+    result.hidden = true;
+    intro.hidden = false;
+    status.textContent = "";
+    prefill();
+    loadPlayer(true);
+    player.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
   new ResizeObserver(draw).observe(canvas);
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  new ResizeObserver(drawFrame).observe(playerCanvas);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    draw();
+    drawFrame();
+  });
 
   // Until the first simulation, opening the tab follows what the Plots tab
-  // shows; after that it keeps the inputs as they were.
+  // shows; after that it keeps the inputs as they were. The default view
+  // follows the run and n in the form.
   return {
     shown() {
       if (!data) prefill();
       draw();
+      loadPlayer(false);
+      drawFrame();
     },
   };
 }

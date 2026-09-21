@@ -94,36 +94,94 @@ function pretty(formula) {
   return formula.replace(/delta/g, "δ").replace(/lambda/g, "λ");
 }
 
-// One line under the pickers saying what the run is, and a warning when it
-// did not finish - its CSVs may then be missing or cut short.
+// What a --permutation spec means, in words.
+function describePermutation(spec) {
+  const [kind, args = ""] = spec.split(":");
+  const values = args.split(",");
+  if (kind === "uniform") return "a uniformly random order of the keys 1..n";
+  if (kind === "probing") {
+    return "linear probing: pick a random key; if it is already in, take the next free one above it, wrapping from n to 1";
+  }
+  if (kind === "blocks") {
+    return "blocks of " + values[0] + " consecutive keys; the blocks in random order, and the keys within each block in random order";
+  }
+  if (kind === "zipf") {
+    return "the keys split into " + values[0] + " equal regions; each insert picks a region with weight 1/rank^" +
+      values[1] + " (hot regions placed at random), then a random key in it - hot regions fill early, cold ones late";
+  }
+  return "";
+}
+
+// "2026-09-21 12:08:48 UTC", and how long the run took when it finished.
+function runTime(meta) {
+  if (!meta.started) return null;
+  const start = meta.started.replace("T", " ").replace("Z", " UTC");
+  if (!meta.finished) return start;
+  const seconds = (Date.parse(meta.finished) - Date.parse(meta.started)) / 1000;
+  const took = seconds < 60 ? Math.round(seconds) + " s"
+    : Math.floor(seconds / 60) + " min " + String(Math.round(seconds % 60)).padStart(2, "0") + " s";
+  return start + "  (took " + took + ")";
+}
+
+// The run's metadata as a label / value list under the pickers, with a warning
+// first when the run did not finish - its CSVs may then be missing or cut short.
 function renderRunMeta(run) {
   const meta = runMeta(run);
   runMetaLine.textContent = "";
-  runMetaLine.className = "status";
+  runMetaLine.classList.remove("incomplete");
   if (!meta) {
     runMetaLine.textContent = "No meta.json for this run.";
     return;
   }
 
-  const parts = [];
-  if (meta.seed !== undefined && meta.seed !== null) parts.push("seed " + meta.seed);
-  if (meta.permutation) parts.push("permutation " + meta.permutation);
-  if (meta.commit) {
-    parts.push("commit " + meta.commit + (meta.dirty ? " (uncommitted changes)" : ""));
+  function row(label, ...content) {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const value = document.createElement("dd");
+    for (const piece of content) {
+      if (piece === null || piece === undefined || piece === "") continue;
+      value.append(piece);
+    }
+    runMetaLine.append(term, value);
+    return value;
   }
-  if (meta.started) parts.push(meta.started.replace("T", " ").replace("Z", " UTC"));
-  if (meta.cost) parts.push("cost " + pretty(meta.cost));
-  runMetaLine.textContent = parts.join(" · ") + " · ";
+
+  function code(text) {
+    const element = document.createElement("code");
+    element.textContent = text;
+    return element;
+  }
+
+  function aside(text) {
+    const element = document.createElement("span");
+    element.className = "aside";
+    element.textContent = text;
+    return element;
+  }
+
+  if (meta.status && meta.status !== "complete") {
+    runMetaLine.classList.add("incomplete");
+    row("status", "run " + meta.status + ", not complete - its results may be partial");
+  }
+  if (meta.seed !== undefined && meta.seed !== null) {
+    row("seed", code(String(meta.seed)), aside("each n uses seed + n"));
+  }
+  if (meta.permutation) {
+    row("permutation", code(meta.permutation), aside(describePermutation(meta.permutation)));
+  }
+  if (meta.cost) row("cost", pretty(meta.cost));
+  const time = runTime(meta);
+  if (time) row("time", time);
+  if (meta.commit) {
+    row("commit", code(meta.commit),
+        meta.dirty === true ? aside("plus uncommitted changes") : null,
+        meta.dirty === null && meta.commit !== "unknown" ? aside("uncommitted changes unknown") : null);
+  }
 
   const link = document.createElement("a");
   link.href = "/results/" + encodeURIComponent(name) + "/" + run + "/meta.json";
   link.textContent = "meta.json";
-  runMetaLine.appendChild(link);
-
-  if (meta.status && meta.status !== "complete") {
-    runMetaLine.classList.add("incomplete");
-    runMetaLine.prepend("Run " + meta.status + ", not complete: its results may be partial. ");
-  }
+  row("file", link);
 }
 
 function message(text, command) {

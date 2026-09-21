@@ -225,8 +225,27 @@ button:disabled { opacity: 0.5; cursor: progress; }
 .pickers .status { margin: 0; align-self: center; }
 
 /* the run's metadata: its own full-width line under the pickers */
-#run-meta { flex-basis: 100%; }
-#run-meta.incomplete { color: var(--warn); }
+.run-meta {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 20px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.run-meta dt { color: var(--muted); }
+.run-meta dd { margin: 0; }
+/* .pickers span styles the picker labels; these asides are ordinary text */
+.run-meta .aside {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.run-meta.incomplete dt:first-of-type,
+.run-meta.incomplete dd:first-of-type { color: var(--warn); font-weight: 600; }
 
 /* Every half-step of delta is a row, so the table scrolls on its own. */
 .table-wrap {
@@ -339,4 +358,22 @@ code {
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
+}
+
+/* simulate default view: one plot stepping through the prefixes */
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.player-controls input[type="range"] { flex: 1; min-width: 160px; }
+
+.player-label {
+  margin: 0 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
 }

@@ -29,7 +29,7 @@
         <select id="n"></select>
       </label>
       <a id="csv" class="csv" hidden>download CSV</a>
-      <p id="run-meta" class="status"></p>
+      <dl id="run-meta" class="run-meta"></dl>
     </div>
 
     <h2 id="n-heading" class="section" hidden></h2>
@@ -44,18 +44,24 @@
       </label>
       <label>
         <span>n</span>
-        <input id="sim-n" type="number" min="1" step="1" required>
+        <input id="sim-n" type="text" inputmode="numeric" list="sim-n-values" autocomplete="off" required>
+        <datalist id="sim-n-values"></datalist>
       </label>
+      <button id="sim-simulate" type="button"
+        title="Play the best segments for t = n/8, n/4, ..., n">Simulate</button>
       <label>
         <span>prefix length t</span>
-        <input id="sim-t" type="number" min="1" step="1" required>
+        <input id="sim-t" type="number" min="1" step="1" placeholder="1 to n">
       </label>
-      <button type="submit">Run</button>
+      <button id="sim-inspect" type="submit"
+        title="Every δ tried on the prefix of length t, and its segments">Inspect prefix</button>
       <p id="sim-status" class="status"></p>
     </form>
 
-    <p id="sim-intro" class="status">One prefix of one n, with the run's seed: &delta; = 0.5, 1, 1.5, &hellip;
-      until no larger &delta; can lower qc = log&#8322;&delta; + log&#8322;&lambda;.</p>
+    <p id="sim-intro" class="status"><b>Simulate</b> plays the best &delta;'s segments as the prefix grows,
+      t = n/8, n/4, &hellip;, n. <b>Inspect prefix</b> takes one prefix length t and tries
+      &delta; = 0.5, 1, 1.5, &hellip; until no larger &delta; can lower qc = log&#8322;&delta; + log&#8322;&lambda;.
+      Both use the run's seed and permutation.</p>
 
     <div id="sim-result" hidden>
       <p id="sim-summary" class="status"></p>
@@ -76,6 +82,19 @@
         Click a row of the table to draw that &delta;.</p>
       <canvas id="sim-plot" class="plot"></canvas>
     </div>
+
+    <section id="sim-player" hidden>
+      <h3 id="player-heading" class="section"></h3>
+      <p class="status">The best &delta;'s segments as the prefix grows, t = n/8, n/4, &hellip;, n,
+        with the run's seed. Keys run over 1..n in every frame, so the prefix fills in.</p>
+      <div class="player-controls">
+        <button id="player-play" type="button">Pause</button>
+        <input id="player-frame" type="range" min="0" max="7" step="1" value="0" aria-label="prefix">
+        <button id="player-open" type="button" disabled>Inspect this prefix</button>
+      </div>
+      <p id="player-label" class="player-label"></p>
+      <canvas id="player-plot" class="plot"></canvas>
+    </section>
   </section>
 </main>
 
