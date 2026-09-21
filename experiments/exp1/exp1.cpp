@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <numeric>
@@ -14,8 +15,8 @@
 #include <string>
 #include <vector>
 
-#include "../src/ORourke/brute_orourke.hpp"
-#include "../src/ORourke/pgm_orourke.hpp"
+#include "../../src/ORourke/brute_orourke.hpp"
+#include "../../src/ORourke/pgm_orourke.hpp"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -40,7 +41,7 @@ inline void omp_set_num_threads(int) {}
 // delta = 0.5, 1, 2, 4, 8, 16, 32
 const std::vector<int64_t> FIXED_K = {1, 2, 4, 8, 16, 32, 64};
 const char *DEFAULT_NS = "128,256,512,1024,2048,4096,8192,16384,32768,65536";
-const char *DEFAULT_OUT = "results";
+const char *DEFAULT_OUT = "results/exp1";
 
 // One evaluated error bound on one prefix.
 struct Row {
@@ -290,11 +291,30 @@ bool validate(size_t n, uint64_t seed) {
     return true;
 }
 
+// Creates DIR/<run> for the next unused run number and returns its path.
+std::string next_run_dir(const std::string &base) {
+    namespace fs = std::filesystem;
+    int run = 0;
+    if (fs::exists(base)) {
+        for (const auto &entry : fs::directory_iterator(base)) {
+            std::string name = entry.path().filename().string();
+            if (entry.is_directory() && !name.empty() &&
+                name.find_first_not_of("0123456789") == std::string::npos) {
+                run = std::max(run, std::stoi(name));
+            }
+        }
+    }
+    std::string dir = base + "/" + std::to_string(run + 1);
+    fs::create_directories(dir);
+    return dir;
+}
+
 void usage(const char *program) {
     std::cerr << "usage: " << program << " [-n N,N,...] [-j THREADS] [--out DIR] [--validate] [seed]\n"
               << "  -n N,N,...  universe sizes (default " << DEFAULT_NS << ")\n"
               << "  -j THREADS  threads (default: one per core)\n"
-              << "  --out DIR   directory for the CSVs (default " << DEFAULT_OUT << ")\n"
+              << "  --out DIR   directory holding the runs (default " << DEFAULT_OUT << "); the CSVs go to\n"
+              << "              DIR/<run>, run = 1, 2, ... the next unused number\n"
               << "  --validate  check the search against trying every k, and the segment\n"
               << "              sizes against the brute-force O'Rourke; writes no files\n"
               << "  seed        random if omitted\n";
@@ -365,6 +385,9 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
+
+    out_dir = next_run_dir(out_dir);
+    std::cout << "run directory: " << out_dir << std::endl;
 
     Progress progress;
     progress.started = std::chrono::steady_clock::now();
