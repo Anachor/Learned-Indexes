@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experiment</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="back" href="/">&larr; experiments</a>
+  <h1 id="title">&hellip;</h1>
+</header>
+
+<main>
+  <nav id="tabs" class="tabs" role="tablist" hidden>
+    <button type="button" role="tab" data-tab="plots" class="active" aria-selected="true">Plots</button>
+    <button type="button" role="tab" data-tab="simulate" aria-selected="false" hidden>Simulate</button>
+  </nav>
+
+  <div id="tab-plots" role="tabpanel">
+    <div id="pickers" class="pickers" hidden>
+      <label>
+        <span>Run</span>
+        <select id="run"></select>
+      </label>
+      <label>
+        <span>n</span>
+        <select id="n"></select>
+      </label>
+      <a id="csv" class="csv" hidden>download CSV</a>
+      <dl id="run-meta" class="run-meta"></dl>
+    </div>
+
+    <h2 id="n-heading" class="section" hidden></h2>
+    <div id="figures"></div>
+  </div>
+
+  <section id="tab-simulate" role="tabpanel" hidden>
+    <form id="simulate-form" class="pickers">
+      <label>
+        <span>Run</span>
+        <select id="sim-run"></select>
+      </label>
+      <label>
+        <span>n</span>
+        <input id="sim-n" type="text" inputmode="numeric" list="sim-n-values" autocomplete="off" required>
+        <datalist id="sim-n-values"></datalist>
+      </label>
+      <button id="sim-simulate" type="button"
+        title="Play the best segments for t = n/8, n/4, ..., n">Simulate</button>
+      <label>
+        <span>prefix length t</span>
+        <input id="sim-t" type="number" min="1" step="1" placeholder="1 to n">
+      </label>
+      <button id="sim-inspect" type="submit"
+        title="Every δ tried on the prefix of length t, and its segments">Inspect prefix</button>
+      <p id="sim-status" class="status"></p>
+    </form>
+
+    <p id="sim-intro" class="status"><b>Simulate</b> plays the best &delta;'s segments as the prefix grows,
+      t = n/8, n/4, &hellip;, n. <b>Inspect prefix</b> takes one prefix length t and tries
+      &delta; = 0.5, 1, 1.5, &hellip; until no larger &delta; can lower qc = log&#8322;&delta; + log&#8322;&lambda;.
+      Both use the run's seed and permutation.</p>
+
+    <div id="sim-result" hidden>
+      <p id="sim-summary" class="status"></p>
+      <div class="table-wrap">
+      <table id="sim-table" class="deltas">
+        <thead>
+          <tr><th>&delta;</th><th>&lambda;</th><th>qc = log&#8322;&delta; + log&#8322;&lambda;</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <p id="sim-stop" class="status"></p>
+      <p class="status">Same table from the command line: <code id="sim-command"></code></p>
+
+      <h3 id="plot-heading" class="section"></h3>
+      <p class="status">Keys against rank, with each segment's line and its &plusmn;&delta; band.
+        Drag across the plot to zoom in on a range of keys, double-click to zoom out.
+        Click a row of the table to draw that &delta;.</p>
+      <div class="player-controls">
+        <button class="segments-toggle" type="button" aria-pressed="false">Hide segments</button>
+      </div>
+      <canvas id="sim-plot" class="plot"></canvas>
+    </div>
+
+    <section id="sim-player" hidden>
+      <h3 id="player-heading" class="section"></h3>
+      <p class="status">The best &delta;'s segments as the prefix grows, t = n/8, n/4, &hellip;, n,
+        with the run's seed. Keys run over 1..n in every frame, so the prefix fills in.</p>
+      <div class="player-controls">
+        <button id="player-play" type="button">Pause</button>
+        <input id="player-frame" type="range" min="0" max="7" step="1" value="0" aria-label="prefix">
+        <button id="player-open" type="button" disabled>Inspect this prefix</button>
+        <button class="segments-toggle" type="button" aria-pressed="false">Hide segments</button>
+      </div>
+      <p id="player-label" class="player-label"></p>
+      <canvas id="player-plot" class="plot"></canvas>
+    </section>
+  </section>
+</main>
+
+<script src="/simulate.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #d8dce2;
+  --text: #16191d;
+  --muted: #667085;
+  --link: #1f6feb;
+  --warn: #9a6700;
+  --grid: #eceef1;
+  --series-1: #1f6feb;
+  --series-2: #d4580f;
+  --highlight: #e7f0fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --grid: #22272d;
+    --series-1: #5aa2ff;
+    --series-2: #f0883e;
+    --highlight: #17283d;
+    --bg: #14171a;
+    --panel: #1c2024;
+    --border: #2d333b;
+    --text: #e6e8eb;
+    --muted: #97a0ab;
+    --link: #6cb0ff;
+    --warn: #d4a72c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 16px 64px;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+header, main {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+header {
+  padding: 32px 0 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 28px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+a { color: var(--link); }
+
+.back {
+  display: inline-block;
+  margin-bottom: 12px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.back:hover { color: var(--link); }
+
+/* homepage cards */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  display: block;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card:hover { border-color: var(--link); }
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.card dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.card dt { color: var(--muted); }
+
+.card dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.warn {
+  margin: 12px 0 0;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+/* experiment page */
+
+.pickers {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pickers label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pickers span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+select {
+  min-width: 120px;
+  padding: 7px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+select:disabled { opacity: 0.5; }
+
+input[type="number"] {
+  width: 140px;
+  padding: 7px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  padding: 7px 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover, button.active { border-color: var(--link); color: var(--link); }
+button:disabled { opacity: 0.5; cursor: progress; }
+
+/* tabs */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: -12px 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs button {
+  margin-bottom: -1px;
+  padding: 8px 18px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--muted);
+}
+
+.tabs button:hover { color: var(--text); border-color: transparent; }
+
+.tabs button.active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+  font-weight: 600;
+}
+
+/* simulate tab */
+
+#tab-simulate .pickers {
+  margin-bottom: 16px;
+}
+
+.status {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.pickers .status { margin: 0; align-self: center; }
+
+/* the run's metadata: its own full-width line under the pickers */
+.run-meta {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 20px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.run-meta dt { color: var(--muted); }
+.run-meta dd { margin: 0; }
+/* .pickers span styles the picker labels; these asides are ordinary text */
+.run-meta .aside {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.run-meta.incomplete dt:first-of-type,
+.run-meta.incomplete dd:first-of-type { color: var(--warn); font-weight: 600; }
+
+/* Every half-step of delta is a row, so the table scrolls on its own. */
+.table-wrap {
+  position: relative;  /* rows' offsetTop is measured from here */
+  display: inline-block;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+table.deltas thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+
+table.deltas {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+table.deltas th, table.deltas td {
+  padding: 5px 16px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+table.deltas th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+table.deltas tbody tr { cursor: pointer; }
+table.deltas tbody tr:hover { background: var(--panel); }
+table.deltas tr.best td { font-weight: 700; }
+table.deltas tr.best td:first-child::before { content: "★ "; color: var(--warn); }
+table.deltas tr.selected td { background: var(--highlight); }
+
+h3.section {
+  margin: 20px 0 6px;
+  font-size: 15px;
+}
+
+canvas.plot {
+  display: block;
+  width: 100%;
+  height: 460px;
+  background: var(--bg);
+  border-radius: 8px;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.csv {
+  margin-left: auto;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+h2.section {
+  margin: 8px 0 16px;
+  font-size: 17px;
+}
+
+figure {
+  margin: 0 0 32px;
+}
+
+figcaption {
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.empty {
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+pre {
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+code {
+  padding: 1px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+/* simulate default view: one plot stepping through the prefixes */
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.player-controls input[type="range"] { flex: 1; min-width: 160px; }
+
+.player-label {
+  margin: 0 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+/* n on the Simulate tab: a text field with the run's n values as suggestions */
+#sim-n {
+  width: 150px;
+  padding: 7px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
