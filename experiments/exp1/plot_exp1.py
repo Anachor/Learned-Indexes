@@ -152,39 +152,55 @@ def plot_overall(summary, figures):
     return paths
 
 
-def latest_run(results):
-    runs = [int(d) for d in os.listdir(results) if d.isdigit() and os.path.isdir(os.path.join(results, d))]
-    if not runs:
-        raise SystemExit(f"no runs in {results}/ - run experiments/exp1/exp1 first")
-    return max(runs)
+def all_runs(results):
+    """The run numbers under results/, ascending."""
+    try:
+        names = os.listdir(results)
+    except OSError:
+        return []
+    return sorted(int(d) for d in names if d.isdigit() and os.path.isdir(os.path.join(results, d)))
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--results", default="results/exp1", help="directory holding the runs")
-    parser.add_argument("--figures", default="figures/exp1", help="directory for the per-run figure folders")
-    parser.add_argument("--run", type=int, help="run number (default: the latest)")
-    arguments = parser.parse_args()
+def csv_paths(results):
+    """The run's exp1_n<N>.csv files, by n."""
+    return sorted(glob.glob(os.path.join(results, "exp1_n*.csv")),
+                  key=lambda p: int(re.search(r"exp1_n(\d+)\.csv$", p).group(1)))
 
-    run = arguments.run if arguments.run is not None else latest_run(arguments.results)
-    results = os.path.join(arguments.results, str(run))
-    figures = os.path.join(arguments.figures, str(run))
 
-    # A run that was stopped part-way keeps status "running": its last CSV may be
-    # cut short, and plotting it would show a curve that just stops.
+def status_of(results):
+    """The run's meta.json status, or None when it has none."""
     try:
         with open(os.path.join(results, "meta.json")) as handle:
-            status = json.load(handle).get("status")
+            return json.load(handle).get("status")
     except (OSError, ValueError):
-        status = None
+        return None
+
+
+def needs_plot(results, figures):
+    """True when the run has no figures, or a CSV newer than its oldest figure.
+
+    Only the data counts: a change to this script is not seen, so after editing
+    it, plot with --all.
+    """
+    pngs = glob.glob(os.path.join(figures, "**", "*.png"), recursive=True)
+    if not pngs:
+        return True
+    oldest_figure = min(os.path.getmtime(p) for p in pngs)
+    return any(os.path.getmtime(p) > oldest_figure for p in csv_paths(results))
+
+
+def plot_run(run, results, figures):
+    # A run that was stopped part-way keeps status "running": its last CSV may be
+    # cut short, and plotting it would show a curve that just stops.
+    status = status_of(results)
     if status is not None and status != "complete":
         print(f"warning: run {run} is {status!r}, not complete - its results may be partial",
               file=sys.stderr)
 
-    paths = sorted(glob.glob(os.path.join(results, "exp1_n*.csv")),
-                   key=lambda p: int(re.search(r"exp1_n(\d+)\.csv$", p).group(1)))
+    paths = csv_paths(results)
     if not paths:
-        raise SystemExit(f"no exp1_n*.csv in {results}/")
+        print(f"run {run}: no exp1_n*.csv in {results}/, skipped", file=sys.stderr)
+        return
 
     os.makedirs(figures, exist_ok=True)
     summary = {}
@@ -199,6 +215,69 @@ def main():
         summary[n] = statistics(best)
 
     print("\n".join(plot_overall(summary, figures)))
+
+
+def run_list(text):
+    """--only's value: "2,3" (or "(2,3)") -> [2, 3]."""
+    try:
+        runs = [int(part) for part in text.strip("()[] ").split(",") if part.strip()]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected run numbers like 2,3, not {text!r}")
+    if not runs:
+        raise argparse.ArgumentTypeError("expected at least one run number")
+    return runs
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--results", default="results/exp1", help="directory holding the runs")
+    parser.add_argument("--figures", default="figures/exp1", help="directory for the per-run figure folders")
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument("--new", action="store_true",
+                       help="(default) runs with no figures, or with CSVs newer than their figures; "
+                            "skips runs that have not finished")
+    which.add_argument("--latest", action="store_true", help="the highest-numbered run, plotted or not")
+    which.add_argument("--all", action="store_true", help="every run - after changing this script")
+    which.add_argument("--only", type=run_list, metavar="RUNS", help="just these runs, e.g. --only=2,3")
+    arguments = parser.parse_args()
+
+    runs = all_runs(arguments.results)
+    if not runs:
+        raise SystemExit(f"no runs in {arguments.results}/ - run experiments/exp1/exp1 first")
+
+    def places(run):
+        return os.path.join(arguments.results, str(run)), os.path.join(arguments.figures, str(run))
+
+    if arguments.only:
+        missing = [run for run in arguments.only if run not in runs]
+        if missing:
+            raise SystemExit(f"no run {', '.join(map(str, missing))} in {arguments.results}/ "
+                             f"(runs: {', '.join(map(str, runs))})")
+        chosen = arguments.only
+    elif arguments.latest:
+        chosen = [runs[-1]]
+    elif arguments.all:
+        chosen = runs
+    else:
+        chosen = []
+        for run in runs:
+            results, figures = places(run)
+            status = status_of(results)
+            if status is not None and status != "complete":
+                if needs_plot(results, figures):
+                    print(f"run {run} is {status!r}, not complete - skipped; plot it with --only={run}",
+                          file=sys.stderr)
+                continue
+            if needs_plot(results, figures):
+                chosen.append(run)
+        if not chosen:
+            print("nothing new to plot - every finished run's figures are up to date "
+                  "(--all replots everything, --only=N one run)")
+            return
+
+    for run in chosen:
+        print(f"-- run {run}")
+        plot_run(run, *places(run))
 
 
 if __name__ == "__main__":

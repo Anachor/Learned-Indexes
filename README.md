@@ -72,10 +72,13 @@ delta (1a) and a set of fixed deltas (1b).
   and one segment wins. Orders that vary the key density along the prefix -
   zipf - make splitting pay. Measured at n = 1024, 4096, 16384.
 
-- **Plot**: reads those CSVs, writes `query_complexity.png`, `segments.png` and `best_delta.png` for each n to `figures/exp1/<run>/n<N>/`. Uses the latest run unless `--run N` is given.
+- **Plot**: reads those CSVs, writes `query_complexity.png`, `segments.png` and `best_delta.png` for each n to `figures/exp1/<run>/n<N>/`, and the across-n summaries to `figures/exp1/<run>/overall/`. Which runs:
+  `--new` (default) the runs with no figures, or with CSVs newer than their figures, skipping runs that have not finished;
+  `--latest` the highest-numbered run; `--all` every run (after changing the plot script, which `--new` cannot see);
+  `--only=2,3` just those runs.
 
     ```
-    python3 experiments/exp1/plot_exp1.py [--run N] [--results DIR] [--figures DIR]
+    python3 experiments/exp1/plot_exp1.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
     ```
 
 - **Validate** (small n, writes nothing): checks the best-delta search against
@@ -111,12 +114,14 @@ view can be linked.
 
 It generates nothing - run the plot script first, and if a run has no figures the
 page says which command to run. The one exception is the **Simulate** tab, shown when
-`experiments/<exp>/<exp>` is built: it runs `--simulate` on a chosen run, n and
-prefix length (default: the run and n open on the Plots tab, and half of n) with
-the run's seed and permutation, read from its `meta.json` (the seed from its CSVs
-for runs without one), and shows the table and a plot of the
-segments. The figures are on the **Plots** tab. Figures are re-read on every request, so
-re-plotting and reloading the page is enough to see new output.
+`experiments/<exp>/<exp>` is built. It runs `--simulate` with the run's seed and
+permutation, read from its `meta.json` (the seed from its CSVs for runs without
+one), and nothing until a button is pressed: **Simulate** plays the best segments
+for t = n/8, n/4, ..., n; **Inspect prefix** shows one prefix length's table of
+deltas and a zoomable plot of its segments. n is typed or picked from the run's
+values. Results are cached in the page. The figures are on the **Plots** tab.
+Figures are re-read on every request, so re-plotting and reloading the page is
+enough to see new output.
 
 To keep it running as a systemd user service (restarts on failure, keeps running
 after logout, starts at boot):

@@ -5,3 +5,4 @@ experiments/exp1/exp1
 results/
 figures/
 .claude/
+__pycache__/

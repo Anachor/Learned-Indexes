@@ -228,7 +228,7 @@ function render() {
     writeHash(run, null);
     message(
       "No figures for run " + run + ". Generate them with:",
-      "python3 experiments/" + name + "/plot_" + name + ".py --run " + run
+      "python3 experiments/" + name + "/plot_" + name + ".py --only=" + run
     );
     return;
   }
