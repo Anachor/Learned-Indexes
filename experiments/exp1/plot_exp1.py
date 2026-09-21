@@ -39,7 +39,7 @@ def query_complexity(frame):
 
 def delta_label(k):
     delta = k / 2
-    return f"delta={delta:g}"
+    return f"δ={delta:g}"
 
 
 def save(fig, folder, name):
@@ -61,7 +61,7 @@ def plot_n(fixed, best, n, figures):
     axis.plot(best["t"], best["cost"], lw=1.5, ls="--", color="black", label="best")
     axis.set_title(f"Query complexity, n = {n}")
     axis.set_xlabel("prefix length t")
-    axis.set_ylabel("query complexity\nlog2(\u03bb) + log2(delta)")
+    axis.set_ylabel("query complexity\nlog2(\u03bb) + log2(δ)")
     axis.legend(ncol=2)
     axis.grid(alpha=0.3)
     paths.append(save(fig, folder, "query_complexity.png"))
@@ -82,14 +82,14 @@ def plot_n(fixed, best, n, figures):
     paths.append(save(fig, folder, "segments.png"))
 
     fig, axis = plt.subplots(figsize=(9, 5))
-    axis.plot(best["t"], best["k"] / 2, lw=1, color="tab:orange", label="best delta")
-    axis.set_title(f"Best delta and its \u03bb, n = {n}")
+    axis.plot(best["t"], best["k"] / 2, lw=1, color="tab:orange", label="best δ")
+    axis.set_title(f"Best δ and its \u03bb, n = {n}")
     axis.set_xlabel("prefix length t")
-    axis.set_ylabel("best delta", color="tab:orange")
+    axis.set_ylabel("best δ", color="tab:orange")
     axis.grid(alpha=0.3)
     twin = axis.twinx()
-    twin.plot(best["t"], best["L"], lw=1, color="tab:blue", label="\u03bb at best delta")
-    twin.set_ylabel("\u03bb at the best delta", color="tab:blue")
+    twin.plot(best["t"], best["L"], lw=1, color="tab:blue", label="\u03bb at best δ")
+    twin.set_ylabel("\u03bb at the best δ", color="tab:blue")
     handles = axis.get_lines() + twin.get_lines()
     axis.legend(handles, [h.get_label() for h in handles], loc="upper right")
     paths.append(save(fig, folder, "best_delta.png"))
@@ -143,10 +143,10 @@ def plot_overall(summary, figures):
         paths.append(save(fig, folder, name))
 
     by_statistic("best_cost", "Summary query complexity over prefixes, by n",
-                 "query complexity at the best delta\nlog2(λ) + log2(delta)",
+                 "query complexity at the best δ\nlog2(λ) + log2(δ)",
                  "query_complexity.png")
-    by_statistic("best_delta", "Best delta over prefixes, by n",
-                 "best delta", "best_delta.png")
+    by_statistic("best_delta", "Summary optimal δ over prefixes, by n",
+                 "optimal δ", "best_delta.png")
     return paths
 
 

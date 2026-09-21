@@ -126,6 +126,16 @@ std::vector<Row> analyse_prefix(ORourke<int64_t> &orourke, const std::vector<int
     return rows;
 }
 
+// The random permutation of {1..n} for this seed. run_n, validate and simulate
+// all draw it from here, so a simulation sees exactly the keys a run saw.
+std::vector<int64_t> make_permutation(size_t n, uint64_t seed) {
+    std::vector<int64_t> permutation(n);
+    std::iota(permutation.begin(), permutation.end(), 1);
+    std::mt19937_64 rng(seed);
+    std::shuffle(permutation.begin(), permutation.end(), rng);
+    return permutation;
+}
+
 // Progress, weighted by prefix length because a prefix of length t costs O(t).
 struct Progress {
     std::atomic<uint64_t> weight_done{0};
@@ -171,10 +181,7 @@ struct NResult {
 // Every prefix of one random permutation of {1..n}. Threads split the prefixes
 // between them; each keeps its own sorted copy of the keys inserted so far.
 NResult run_n(size_t n, uint64_t seed, Progress &progress) {
-    std::vector<int64_t> permutation(n);
-    std::iota(permutation.begin(), permutation.end(), 1);
-    std::mt19937_64 rng(seed);
-    std::shuffle(permutation.begin(), permutation.end(), rng);
+    std::vector<int64_t> permutation = make_permutation(n, seed);
 
     NResult result;
     result.rows.resize(n + 1);
@@ -223,10 +230,7 @@ NResult run_n(size_t n, uint64_t seed, Progress &progress) {
 // Checks the minimisation against trying every k, and the segment sizes against
 // BruteORourke. O(n^3), so small n only. Returns false on the first mismatch.
 bool validate(size_t n, uint64_t seed) {
-    std::vector<int64_t> permutation(n);
-    std::iota(permutation.begin(), permutation.end(), 1);
-    std::mt19937_64 rng(seed);
-    std::shuffle(permutation.begin(), permutation.end(), rng);
+    std::vector<int64_t> permutation = make_permutation(n, seed);
 
     PgmORourke<int64_t> pgm(1);
     BruteORourke<int64_t> brute(1);
@@ -291,6 +295,79 @@ bool validate(size_t n, uint64_t seed) {
     return true;
 }
 
+// The segments of a sorted prefix under bound k, as count_segments finds them on
+// (key, 2*rank), with each line scaled back to (key, rank).
+std::vector<Segment> segments_of(ORourke<int64_t> &orourke, const std::vector<int64_t> &x, int64_t k) {
+    orourke.reset(k);
+    std::vector<Segment> segments;
+    size_t begin = 0;
+    for (size_t i = 0; i < x.size(); ++i) {
+        if (auto closed = orourke.add_point(x[i], 2 * int64_t(i))) {
+            segments.push_back({begin, i, *closed});
+            begin = i;
+        }
+    }
+    if (!x.empty()) segments.push_back({begin, x.size(), orourke.current()});
+    for (Segment &s : segments) {
+        s.line.y0 /= 2;
+        s.line.slope /= 2;
+    }
+    return segments;
+}
+
+// One prefix of length t, delta = 1/2, 1, 2, 4, ... (k = 1, 2, 4, ...), with
+// qc = log2(delta) + log2(lambda). lambda >= 1, so qc >= log2(delta): once the
+// next delta reaches the best delta * lambda so far, no larger delta can have a
+// lower qc and the doubling stops. In k: stop when 2k >= k_best * L_best.
+//
+// Prints delta,lambda,qc as CSV, or with json the keys and every delta's
+// segments as well, for the results server to draw.
+void simulate(size_t n, size_t t, uint64_t seed, bool json) {
+    std::vector<int64_t> permutation = make_permutation(n, seed);
+    std::vector<int64_t> x(permutation.begin(), permutation.begin() + t);
+    std::sort(x.begin(), x.end());
+
+    PgmORourke<int64_t> orourke(1);
+    std::vector<std::pair<int64_t, std::vector<Segment>>> tried;
+    __int128 best_product = -1;
+    for (int64_t k = 1;; k *= 2) {
+        tried.emplace_back(k, segments_of(orourke, x, k));
+        __int128 product = __int128(k) * tried.back().second.size();
+        if (best_product < 0 || product < best_product) best_product = product;
+        if (__int128(2 * k) >= best_product) break;
+    }
+
+    auto qc = [](int64_t k, size_t L) { return std::log2(double(k) / 2) + std::log2(double(L)); };
+
+    if (!json) {
+        std::cout << "seed,n,t,delta,lambda,qc\n";
+        for (const auto &[k, segments] : tried) {
+            std::cout << seed << ',' << n << ',' << t << ',' << double(k) / 2 << ','
+                      << segments.size() << ',' << qc(k, segments.size()) << '\n';
+        }
+        return;
+    }
+
+    std::ostringstream out;
+    out.precision(17);
+    out << "{\"seed\":" << seed << ",\"n\":" << n << ",\"t\":" << t << ",\"keys\":[";
+    for (size_t i = 0; i < x.size(); ++i) out << (i ? "," : "") << x[i];
+    out << "],\"deltas\":[";
+    for (size_t j = 0; j < tried.size(); ++j) {
+        const auto &[k, segments] = tried[j];
+        out << (j ? "," : "") << "{\"delta\":" << double(k) / 2 << ",\"lambda\":" << segments.size()
+            << ",\"qc\":" << qc(k, segments.size()) << ",\"segments\":[";
+        for (size_t s = 0; s < segments.size(); ++s) {
+            const Segment &g = segments[s];
+            out << (s ? "," : "") << '[' << g.begin << ',' << g.end << ',' << double(g.line.x0) << ','
+                << double(g.line.y0) << ',' << double(g.line.slope) << ']';
+        }
+        out << "]}";
+    }
+    out << "]}\n";
+    std::cout << out.str();
+}
+
 // Creates DIR/<run> for the next unused run number and returns its path.
 std::string next_run_dir(const std::string &base) {
     namespace fs = std::filesystem;
@@ -311,12 +388,18 @@ std::string next_run_dir(const std::string &base) {
 
 void usage(const char *program) {
     std::cerr << "usage: " << program << " [-n N,N,...] [-j THREADS] [--out DIR] [--validate] [seed]\n"
+              << "       " << program << " --simulate T [--json] -n N seed\n"
               << "  -n N,N,...  universe sizes (default " << DEFAULT_NS << ")\n"
               << "  -j THREADS  threads (default: one per core)\n"
               << "  --out DIR   directory holding the runs (default " << DEFAULT_OUT << "); the CSVs go to\n"
               << "              DIR/<run>, run = 1, 2, ... the next unused number\n"
               << "  --validate  check the search against trying every k, and the segment\n"
               << "              sizes against the brute-force O'Rourke; writes no files\n"
+              << "  --simulate T  the prefix of length T of one n, with the run's seed: doubles\n"
+              << "              delta from 1/2 until no larger delta can lower the cost, and\n"
+              << "              prints every delta tried as CSV (delta,lambda,qc with\n"
+              << "              qc = log2 delta + log2 lambda); writes no files\n"
+              << "  --json      with --simulate: JSON with the keys and every delta's segments\n"
               << "  seed        random if omitted\n";
     std::exit(1);
 }
@@ -351,10 +434,13 @@ int main(int argc, char **argv) {
     int threads = omp_get_num_procs();
     bool validate_only = false, has_seed = false;
     uint64_t seed = 0;
+    size_t simulate_t = 0;  // 0: not simulating
+    bool json = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string argument = argv[i];
-        bool takes_value = argument == "-n" || argument == "-j" || argument == "--out";
+        bool takes_value = argument == "-n" || argument == "-j" || argument == "--out" ||
+                           argument == "--simulate";
         if (takes_value && i + 1 >= argc) usage(argv[0]);
 
         if (argument == "-n") {
@@ -366,6 +452,11 @@ int main(int argc, char **argv) {
             out_dir = argv[++i];
         } else if (argument == "--validate") {
             validate_only = true;
+        } else if (argument == "--simulate") {
+            simulate_t = size_t(parse_number(argv[++i], argv[0]));
+            if (simulate_t < 1) usage(argv[0]);
+        } else if (argument == "--json") {
+            json = true;
         } else if (!has_seed) {
             seed = parse_number(argument, argv[0]);
             has_seed = true;
@@ -375,6 +466,15 @@ int main(int argc, char **argv) {
     }
 
     std::vector<size_t> sizes = parse_sizes(sizes_argument, argv[0]);
+
+    // Needs the run's seed to reproduce its keys, so no random default. Same
+    // per-n seed as a run: seed + n.
+    if (simulate_t) {
+        if (!has_seed || validate_only || sizes.size() != 1 || simulate_t > sizes[0]) usage(argv[0]);
+        simulate(sizes[0], simulate_t, seed + sizes[0], json);
+        return 0;
+    }
+
     if (!has_seed) seed = std::random_device{}();
     omp_set_num_threads(threads);
     std::cout << "seed: " << seed << "  threads: " << threads << std::endl;

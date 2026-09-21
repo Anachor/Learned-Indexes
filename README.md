@@ -61,6 +61,15 @@ delta (1a) and a set of fixed deltas (1b).
     ./experiments/exp1/exp1 --validate -n 512 [seed]
     ```
 
+- **Simulate** one prefix (writes nothing): the prefix of length T of n, with a
+  run's seed, for delta = 1/2, 1, 2, ... until no larger delta can lower
+  qc = log2(delta) + log2(lambda). Prints `delta,lambda,qc`; `--json` adds the keys
+  and every delta's segments. The results server has a button for it.
+
+    ```
+    ./experiments/exp1/exp1 --simulate T [--json] -n N seed
+    ```
+
 ## Results server
 
 Browses the figures already in `figures/`: the homepage lists the experiments, and
@@ -75,7 +84,10 @@ Then open `http://localhost:8000/`. The selection is kept in the URL
 (`/exp/exp1#run=1&n=1024`), so a particular view can be linked.
 
 It generates nothing - run the plot script first, and if a run has no figures the
-page says which command to run. Figures are re-read on every request, so
+page says which command to run. The one exception is **Simulate**, shown when
+`experiments/<exp>/<exp>` is built: it runs `--simulate` on a chosen n and prefix
+length (default: the n on screen and half of it) with the run's seed, read from
+its CSVs, and shows the table and a plot of the segments. Figures are re-read on every request, so
 re-plotting and reloading the page is enough to see new output.
 
 To keep it running as a systemd user service (restarts on failure, keeps running

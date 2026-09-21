@@ -173,6 +173,7 @@ fetch("/api/experiments/" + encodeURIComponent(name))
 
     pickers.hidden = false;
     fill(runPicker, data.runs, run);
+    if (data.simulate) setupSimulate(name);
 
     const available = choices(run);
     if (available.some(([value]) => value === hash.n)) {

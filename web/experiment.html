@@ -22,13 +22,48 @@
       <span>n</span>
       <select id="n"></select>
     </label>
+    <button id="simulate-toggle" type="button" hidden>Simulate</button>
     <a id="csv" class="csv" hidden>download CSV</a>
   </div>
+
+  <section id="simulation" class="simulation" hidden>
+    <form id="simulate-form" class="pickers">
+      <label>
+        <span>n</span>
+        <input id="sim-n" type="number" min="1" step="1" required>
+      </label>
+      <label>
+        <span>prefix length t</span>
+        <input id="sim-t" type="number" min="1" step="1" required>
+      </label>
+      <button type="submit">Run</button>
+      <p id="sim-status" class="status"></p>
+    </form>
+
+    <div id="sim-result" hidden>
+      <p id="sim-summary" class="status"></p>
+      <table id="sim-table" class="deltas">
+        <thead>
+          <tr><th>&delta;</th><th>&lambda;</th><th>qc = log&#8322;&delta; + log&#8322;&lambda;</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="sim-stop" class="status"></p>
+      <p class="status">Same table from the command line: <code id="sim-command"></code></p>
+
+      <h3 id="plot-heading" class="section"></h3>
+      <p class="status">Keys against rank, with each segment's line and its &plusmn;&delta; band.
+        Drag across the plot to zoom in on a range of keys, double-click to zoom out.
+        Click a row of the table to draw that &delta;.</p>
+      <canvas id="sim-plot" class="plot"></canvas>
+    </div>
+  </section>
 
   <h2 id="n-heading" class="section" hidden></h2>
   <div id="figures"></div>
 </main>
 
+<script src="/simulate.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

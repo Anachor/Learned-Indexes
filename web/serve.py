@@ -16,7 +16,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 WEB = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(WEB)
@@ -30,6 +32,12 @@ OVERALL = "overall"  # figures/<exp>/<run>/overall/: the figures across n
 FLAT = re.compile(r"^(?P<kind>.+)_n(?P<n>\d+)\.png$")
 RUN = re.compile(r"^\d+$")
 NUMBERED = re.compile(r"^exp(?P<number>\d+)$")
+
+# Simulation limits: the permutation of n keys is built in full, and the t keys
+# of the prefix are sent to the browser to draw.
+SIMULATE_MAX_N = 1 << 24
+SIMULATE_MAX_T = 1 << 20
+SIMULATE_TIMEOUT = 120  # seconds
 
 PAGES = {"index": "index.html", "experiment": "experiment.html"}
 TYPES = {".html": "text/html; charset=utf-8",
@@ -153,6 +161,50 @@ def tables(root, experiment, run):
     return found
 
 
+def binary(root, experiment):
+    """The experiment's compiled program, experiments/<exp>/<exp>, or None."""
+    path = os.path.join(root, "experiments", experiment, experiment)
+    return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
+
+
+def base_seed(root, experiment, run):
+    """The seed a run was started with, or None.
+
+    Each CSV row holds the per-n seed, seed + n, so any one row of any of the
+    run's CSVs gives it back.
+    """
+    for path in sorted(glob.glob(os.path.join(root, "results", experiment, str(run), "*.csv"))):
+        try:
+            with open(path) as handle:
+                header = handle.readline().strip().split(",")
+                row = handle.readline().strip().split(",")
+            return int(row[header.index("seed")]) - int(row[header.index("n")])
+        except (OSError, ValueError, IndexError):
+            continue
+    return None
+
+
+def simulate(root, experiment, run, n, t):
+    """Runs <exp> --simulate on one prefix: (payload, None) or (None, error)."""
+    program = binary(root, experiment)
+    if program is None:
+        return None, f"experiments/{experiment}/{experiment} is not built"
+    seed = base_seed(root, experiment, run)
+    if seed is None:
+        return None, f"no CSV in results/{experiment}/{run}/ to take the seed from"
+    command = [program, "--simulate", str(t), "--json", "-n", str(n), str(seed)]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=SIMULATE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, f"simulation took longer than {SIMULATE_TIMEOUT} s"
+    if done.returncode != 0:
+        return None, (done.stderr.strip().splitlines() or ["simulation failed"])[0]
+    payload = json.loads(done.stdout)
+    payload["run"] = run
+    payload["command"] = " ".join([f"experiments/{experiment}/{experiment}"] + command[1:3] + command[4:])
+    return payload, None
+
+
 def summary(root):
     """The homepage payload: every experiment with its runs, the n values it has
     data for, and its figure count.
@@ -186,6 +238,7 @@ def detail(root, experiment):
         "name": experiment,
         "label": label(experiment),
         "runs": numbers,
+        "simulate": binary(root, experiment) is not None,
         "figures": {str(run): {str(n): images
                                for n, images in figures(root, experiment, run).items()}
                     for run in numbers},
@@ -296,7 +349,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_page("index")
 
         if parts[0] == "api":
-            return self.api(parts[1:])
+            query = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            return self.api(parts[1:], query)
 
         if parts[0] == "exp" and len(parts) == 2:
             if parts[1] not in experiments(self.root):
@@ -318,14 +372,35 @@ class Handler(BaseHTTPRequestHandler):
 
         return self.send_missing()
 
-    def api(self, parts):
+    def api(self, parts, query):
         if parts == ["experiments"]:
             return self.send_json(summary(self.root))
         if len(parts) == 2 and parts[0] == "experiments":
             if parts[1] not in experiments(self.root):
                 return self.send_missing(f"no experiment {parts[1]!r}")
             return self.send_json(detail(self.root, parts[1]))
+        # /api/simulate/<exp>?run=R&n=N&t=T
+        if len(parts) == 2 and parts[0] == "simulate":
+            return self.simulate(parts[1], query)
         return self.send_missing()
+
+    def simulate(self, experiment, query):
+        if experiment not in experiments(self.root):
+            return self.send_missing(f"no experiment {experiment!r}")
+        try:
+            run, n, t = (int(query[key][0]) for key in ("run", "n", "t"))
+        except (KeyError, ValueError):
+            return self.send_json({"error": "run, n and t must be integers"}, status=400)
+        if run not in runs(self.root, experiment):
+            return self.send_missing(f"no run {run}")
+        if not 1 <= n <= SIMULATE_MAX_N:
+            return self.send_json({"error": f"n must be 1 to {SIMULATE_MAX_N}"}, status=400)
+        if not 1 <= t <= min(n, SIMULATE_MAX_T):
+            return self.send_json({"error": f"t must be 1 to {min(n, SIMULATE_MAX_T)}"}, status=400)
+        payload, error = simulate(self.root, experiment, run, n, t)
+        if error:
+            return self.send_json({"error": error}, status=500)
+        return self.send_json(payload)
 
 
 def main():
