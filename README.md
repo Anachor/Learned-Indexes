@@ -7,7 +7,8 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 - `notes/`: paper draft, experiment plan (`Notes.txt`), progress log (`workflow.md`)
 - `src/ORourke/`: O'Rourke interface (`orourke.hpp`) and implementations: PGM, ZLW, brute force
 - `tests/`: stress tests and speed comparison of the implementations
-- `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`
+- `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`;
+  `experiments/common/` holds what they share (permutations, the best-delta search, run folders and `meta.json`)
 - `web/`: a local server for browsing the figures in `figures/`
 - `third_party/`: PGM-index (git submodule), ZLW
 
@@ -55,22 +56,33 @@ delta (1a) and a set of fixed deltas (1b).
 
     ```
     experiments/exp1/build.sh           # CXX=... to pick the compiler (default g++-11 if present)
-    ./experiments/exp1/exp1 [-n N,N,...] [-j THREADS] [--out DIR] [--permutation P] [seed]
+    ./experiments/exp1/exp1 [-n N,N,...] [-j THREADS] [--out DIR] [--permutation P] [--tiebreaker T] [seed]
     ```
+
+  `--tiebreaker minlambda|mindelta` picks the best delta when several give the same
+  qc (so the same delta * lambda): `minlambda`, the fewest segments and so the
+  largest delta (the default), or `mindelta`, the smallest delta and so the most
+  segments (what the runs so far used, before the option existed). qc is the same
+  either way; delta and lambda differ on about
+  10% of prefixes (n = 512). Recorded in `meta.json`, and used by `--validate` and
+  `--simulate` too - the results server passes the run's.
 
   `--permutation` picks the insertion order of 1..n (recorded in `meta.json`):
 
-  | P | order | optimal lambda |
+  | P | order | behaviour |
   |---|---|---|
-  | `uniform` (default) | uniformly random | 1 on ~95% of prefixes |
-  | `zipf:R,s` | R equal key regions; each insert from a region picked with weight 1/rank^s, hot regions placed at random | > 1 on ~99% (R=16, s=1), delta ~2-8 |
-  | `blocks:b` | blocks of b consecutive keys, blocks and keys in random order | > 1, but delta stuck at 0.5 |
-  | `probing` | linear probing: a random key, or the next free one above it, wrapping | 1 on ~90-97%, like uniform |
+  | `uniform` (default) | uniformly random | lambda almost always 1 |
+  | `zipf:R,s` | R equal key regions; each insert from a region picked with weight 1/rank^s, hot regions placed at random | zipf:16,1: the most interesting - delta and lambda both vary; qc a bit higher than uniform |
+  | `zipf:R,s,d` | recursive zipf: the same pick d levels down (regions within regions), ranks shuffled in every region; `zipf:R,s` is d = 1 | zipf:4,1,3: delta basically 1/2, like blocks |
+  | `blocks:b` | blocks of b consecutive keys, blocks and keys in random order | acts like almost sorted: delta always 1/2, each segment a line through its points |
+  | `probing` | linear probing: a random key, or the next free one above it, wrapping | mostly like uniform, with large spikes near the end when clustering happens |
+  | `bitrev[:p]` | almost sorted, then bits reversed: positions in order, p·n swaps of two random positions (default 0), each position's bits reversed; needs n a power of two | lambda 1 on ~85% with delta ~1: the best case; swaps move it toward uniform (n = 512 only) |
 
   Uniform prefixes are random subsets: their deviation from a line grows like
   sqrt(length), so splitting into lambda pieces lowers delta only by sqrt(lambda)
   and one segment wins. Orders that vary the key density along the prefix -
-  zipf - make splitting pay. Measured at n = 1024, 4096, 16384.
+  zipf - make splitting pay. Behaviour from the full runs (n up to 65536); bitrev
+  from n = 512 only.
 
 - **Plot**: reads those CSVs, writes `query_complexity.png`, `segments.png` and `best_delta.png` for each n to `figures/exp1/<run>/n<N>/`, and the across-n summaries to `figures/exp1/<run>/overall/`. Which runs:
   `--new` (default) the runs with no figures, or with CSVs newer than their figures, skipping runs that have not finished;
@@ -95,7 +107,53 @@ delta (1a) and a set of fixed deltas (1b).
   (delta = K/2). The results server's Simulate tab runs it.
 
     ```
-    ./experiments/exp1/exp1 --simulate T [--json | --segments K] [--permutation P] -n N seed
+    ./experiments/exp1/exp1 --simulate T [--json | --segments K] [--permutation P] [--tiebreaker T] -n N seed
+    ```
+
+## Experiment 2
+
+Query complexity of a dynamic learned index: Bentley-Saxe over static O'Rourke
+indexes, as in the PGM paper - base 2, no buffer. Levels 0, 1, 2, ... are each
+empty or hold exactly 2^i keys; inserting the t-th key merges levels 0..i-1 and the
+key into the first empty level i. After t inserts the non-empty levels are the
+1-bits of t. Each level is its own static index (ranks within the level), segmented
+when it is built:
+
+- 2a: a fixed delta on every level (0.5, 1, 2, ..., 32), cost = sum over levels of
+  `log2(delta) + log2(lambda_i)`;
+- 2b: each level with its own best delta (exp1's search), cost = sum of `log2(delta_i) + log2(lambda_i)`.
+
+Same seeds (n uses seed + n), `--permutation` orders and `--tiebreaker` (for each level's own delta) as exp1, so the same seed
+and order give exp1's prefixes, and exp1's static best is the comparison.
+
+- **Run**: writes one CSV per n to `results/exp2/<run>/`, one row group per build -
+  the prefix it was built at and the level it built, with every k evaluated on it
+  (`seed,n,t,level,size,k,L,cost,fixed,best`, cost = that level's `log2(delta) + log2(lambda)`).
+  The levels at prefix t are t's 1-bits, level i built at t with its low i bits
+  cleared, so the plot script sums them. Also writes `meta.json`, as exp1.
+
+    ```
+    experiments/exp2/build.sh
+    ./experiments/exp2/exp2 [-n N,N,...] [--out DIR] [--permutation P] [--tiebreaker T] [seed]
+    ```
+
+- **Plot**: per n, `query_complexity.png` (2a per delta, 2b, and exp1's static best
+  when an exp1 run in `--exp1-results` has the same seed and permutation),
+  `segments.png` (total lambda over levels) and `best_delta.png` (each build's own
+  delta, by level); across n, `overall/query_complexity.png` (2b) and
+  `overall/overhead.png` (2b minus static best, when every n has a match).
+  Same run modes as exp1.
+
+    ```
+    python3 experiments/exp2/plot_exp2.py [--new | --latest | --all | --only=RUNS] [--exp1-results DIR]
+    ```
+
+- **Validate** (small n, writes nothing): checks the levels (sizes are t's bits,
+  each holds the keys it should, together they are the prefix), each build's
+  best-delta search against trying every k, and its segment sizes against brute force.
+
+    ```
+    ./experiments/exp2/exp2 --validate -n 512 [seed]
     ```
 
 ## Results server
@@ -113,15 +171,23 @@ Then open `http://localhost:8000/`. The selection is kept in the URL
 view can be linked.
 
 It generates nothing - run the plot script first, and if a run has no figures the
-page says which command to run. The one exception is the **Simulate** tab, shown when
-`experiments/<exp>/<exp>` is built. It runs `--simulate` with the run's seed and
-permutation, read from its `meta.json` (the seed from its CSVs for runs without
-one), and nothing until a button is pressed: **Simulate** plays the best segments
-for t = n/8, n/4, ..., n; **Inspect prefix** shows one prefix length's table of
-deltas and a zoomable plot of its segments. n is typed or picked from the run's
-values. Results are cached in the page. The figures are on the **Plots** tab.
-Figures are re-read on every request, so re-plotting and reloading the page is
-enough to see new output.
+page says which command to run. The one exception is the **Simulate** tab, shown for
+experiments whose program has `--simulate` (exp1) once it is built. Pick a run, n,
+start, end and a number of steps - start to end in that many equal steps, both
+included (empty: start = end = n/2 and 1 step, the single prefix t = n/2; start =
+end is always one prefix, and t = 0 is skipped): the
+server runs `--simulate` on each of those prefix lengths with the run's seed and
+permutation (from its `meta.json`, or the seed from its CSVs for runs without one)
+and streams them back as they finish. The player steps through them, showing each
+prefix's table of deltas tried, best marked, beside the plot of its keys and
+segments; click a row to draw that delta, drag to zoom. Nothing runs until
+**Simulate** is pressed. To keep the machine safe the server takes at most 100
+steps per simulation and runs at most 4 simulations at once across all requests.
+The tiebreaker defaults to `minlambda`, as the experiments now do, whatever the run
+used (the runs so far used `mindelta`), so on a tied prefix the best delta can differ
+from those runs' figures; qc does not. Pick min δ to match them.
+The figures are on the **Plots** tab. Figures are re-read on every request, so
+re-plotting and reloading the page is enough to see new output.
 
 To keep it running as a systemd user service (restarts on failure, keeps running
 after logout, starts at boot):

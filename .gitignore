@@ -2,6 +2,7 @@ tests/orourke
 tests/orourke_speed
 venv/
 experiments/exp1/exp1
+experiments/exp2/exp2
 results/
 figures/
 .claude/

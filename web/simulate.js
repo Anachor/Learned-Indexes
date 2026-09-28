@@ -1,48 +1,97 @@
-// Simulate tab, with the run's seed and permutation. Two actions, both run by
-// the server with the experiment's program:
+// Simulate tab, with the run's seed and permutation. The server runs the
+// experiment's program on each prefix length of the range in the form - start
+// to end in steps equal steps, both included (empty: n/2, n/2 and 1) - and streams
+// them back as they finish. The player steps through them: at each prefix its
+// table of every delta tried (delta = 1/2, 1, 3/2, ... until no larger delta
+// can lower qc = log2(delta) + log2(lambda)), with the best marked, and the
+// plot of the keys and the segments.
 //
-//   Simulate        plays the best delta's segments for t = n/8, n/4, ..., n
-//   Inspect prefix  one prefix length t: delta = 1/2, 1, 3/2, ... until no larger
-//                   delta can lower qc = log2(delta) + log2(lambda); the table,
-//                   and the segments of whichever delta is picked
-//
-// Nothing runs until one of the buttons is pressed. app.js calls setupSimulate
-// once the experiment has loaded, and the returned shown() each time the tab
-// is opened.
+// Clicking a row pauses and draws that delta, fetching its segments the first
+// time. Nothing runs until Simulate is pressed. app.js calls setupSimulate once
+// the experiment has loaded, and the returned shown() each time the tab opens.
 
 // sizes: the n values each run has data for, offered in the n box.
 function setupSimulate(experiment, runs, sizes) {
   const form = document.getElementById("simulate-form");
   const nInput = document.getElementById("sim-n");
-  const tInput = document.getElementById("sim-t");
+  const startInput = document.getElementById("sim-start");
+  const endInput = document.getElementById("sim-end");
+  const stepsInput = document.getElementById("sim-steps");
+  const tiebreakerInput = document.getElementById("sim-tiebreaker");
   const status = document.getElementById("sim-status");
-  const result = document.getElementById("sim-result");
-  const summary = document.getElementById("sim-summary");
+  const simRun = document.getElementById("sim-run");
+  const runPicker = document.getElementById("run");  // on the Plots tab
+  const nPicker = document.getElementById("n");
+  const nValues = document.getElementById("sim-n-values");
+  const nOpen = document.getElementById("sim-n-open");
+
+  const player = document.getElementById("sim-player");
+  const playerHeading = document.getElementById("player-heading");
+  const playButton = document.getElementById("player-play");
+  const frameSlider = document.getElementById("player-frame");
+  const frameLabel = document.getElementById("player-label");
   const body = document.querySelector("#sim-table tbody");
   const stop = document.getElementById("sim-stop");
   const command = document.getElementById("sim-command");
   const plotHeading = document.getElementById("plot-heading");
   const canvas = document.getElementById("sim-plot");
-  const intro = document.getElementById("sim-intro");
-  const simRun = document.getElementById("sim-run");
-  const runPicker = document.getElementById("run");  // on the Plots tab
-  const nPicker = document.getElementById("n");
-  const nValues = document.getElementById("sim-n-values");
-  const simulateButton = document.getElementById("sim-simulate");
-  const inspectButton = document.getElementById("sim-inspect");
+
+  const MAX_STEPS = 100;  // the server refuses more
+  const FRAME_MS = 1400;
+  const MARGIN = { left: 92, right: 16, top: 12, bottom: 40 };  // left: room for 1,048,576
 
   // runs: [value, label] pairs, labelled as on the Plots tab ("2 · zipf:16,1").
   for (const [run, label] of runs) simRun.appendChild(new Option(label, run));
 
-  // -- defaults: the run and n open on the Plots tab; t left empty -----------
+  // -- form -------------------------------------------------------------------
 
-  // n: one field, typed into or picked from the run's n values (the browser's
-  // suggestion list, filtered by what is typed).
+  // n: one field, typed into, or picked from the run's n values with the button
+  // beside it - all of them, whatever is typed.
   function offerSizes() {
     nValues.textContent = "";
-    for (const n of (sizes || {})[simRun.value] || []) nValues.appendChild(new Option(n.toLocaleString("en-US"), n));
+    const values = (sizes || {})[simRun.value] || [];
+    for (const n of values) {
+      const item = document.createElement("li");
+      item.setAttribute("role", "option");
+      item.dataset.n = n;
+      item.textContent = n.toLocaleString("en-US");
+      nValues.appendChild(item);
+    }
+    if (!values.length) {
+      const item = document.createElement("li");
+      item.className = "none";
+      item.textContent = "no data for this run - type n";
+      nValues.appendChild(item);
+    }
   }
   simRun.addEventListener("change", offerSizes);
+
+  function openSizes(open) {
+    nValues.hidden = !open;
+    nOpen.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    const typed = nInput.value.replace(/[,\s_]/g, "");
+    for (const item of nValues.children) item.classList.toggle("current", item.dataset.n === typed);
+  }
+  nOpen.addEventListener("click", () => openSizes(nValues.hidden));
+  nValues.addEventListener("click", (event) => {
+    const item = event.target.closest("li[data-n]");
+    if (!item) return;
+    nInput.value = item.dataset.n;
+    openSizes(false);
+    nInput.focus();
+  });
+  nInput.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      openSizes(true);
+    } else if (event.key === "Escape") {
+      openSizes(false);
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!nValues.hidden && !event.target.closest(".combo")) openSizes(false);
+  });
 
   function currentN() {
     // The n picker may be on "Across n"; then the smallest n it offers.
@@ -57,116 +106,301 @@ function setupSimulate(experiment, runs, sizes) {
     offerSizes();
   }
 
-  // The n in the box, or null (with a message) when it is not a whole number.
-  function readN() {
+  // A start or end: a number, or an arithmetic expression in n - numbers, n,
+  // + - * /, parentheses, and a number right before n or a parenthesis
+  // multiplying it (3n/4, 2(n-1)). Its value for this n, or null when it does
+  // not parse. Parsed here, never evaluated as code.
+  function evaluate(text, n) {
+    const tokens = text.replace(/\s+/g, "").toLowerCase().match(/\d+(\.\d+)?|[n()+\-*/]|./g) || [];
+    let at = 0;
+    const peek = () => tokens[at];
+    function fail() { throw new Error("parse"); }
+
+    function sum() {
+      let value = product();
+      while (peek() === "+" || peek() === "-") value = tokens[at++] === "+" ? value + product() : value - product();
+      return value;
+    }
+    function product() {
+      let value = unary();
+      for (;;) {
+        if (peek() === "*") { at++; value *= unary(); }
+        else if (peek() === "/") { at++; value /= unary(); }
+        else if (peek() === "n" || peek() === "(") value *= unary();  // 3n, 2(n-1)
+        else return value;
+      }
+    }
+    function unary() {
+      if (peek() === "-") { at++; return -unary(); }
+      if (peek() === "+") { at++; return unary(); }
+      return atom();
+    }
+    function atom() {
+      const token = tokens[at++];
+      if (token === undefined) fail();
+      if (token === "n") return n;
+      if (token === "(") {
+        const value = sum();
+        if (tokens[at++] !== ")") fail();
+        return value;
+      }
+      if (/^\d/.test(token)) return Number(token);
+      return fail();
+    }
+
+    try {
+      const value = sum();
+      return at === tokens.length && Number.isFinite(value) ? value : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // The form's n, start, end and steps, or null (with a message) when they do
+  // not make a range. Empty fields take the defaults: start = end = n/2 (one
+  // prefix) and 1 step.
+  function readForm() {
     const text = nInput.value.replace(/[,\s_]/g, "");
     if (!/^\d+$/.test(text) || Number(text) < 1) {
       status.textContent = "n must be a whole number, at least 1.";
       return null;
     }
-    return Number(text);
-  }
-
-  // -- running ----------------------------------------------------------------
-
-  let data = null;      // the last simulation
-  let selected = 0;     // index into data.deltas of the delta drawn
-  let segments = {};    // k -> that delta's segments, as fetched
-  let view = null;      // [lowest key, highest key] shown, or null for all
-
-  // Every simulation asked for, by "run:n:t": Simulate's prefixes and Inspect
-  // prefix share it, so nothing is fetched twice. Failures are dropped from it so
-  // they can be retried.
-  const cache = new Map();
-
-  function simulation(run, n, t) {
-    const key = run + ":" + n + ":" + t;
-    if (!cache.has(key)) {
-      const query = "?run=" + run + "&n=" + n + "&t=" + t;
-      const request = fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
-        .then((response) => response.json().then((payload) => {
-          if (!response.ok) throw new Error(payload.error || response.statusText);
-          return payload;
-        }));
-      request.catch(() => cache.delete(key));
-      cache.set(key, request);
+    const n = Number(text);
+    function field(input, fallback, name, low, high) {
+      if (input.value === "") return fallback;
+      const value = Number(input.value);
+      if (!(Number.isInteger(value) && value >= low && value <= high)) {
+        status.textContent = name + " must be a whole number from " + low + " to " + high + ".";
+        return null;
+      }
+      return value;
     }
-    return cache.get(key);
+    // start and end: expressions in n, rounded.
+    function position(input, fallback, name, low) {
+      if (input.value.trim() === "") return fallback;
+      const value = evaluate(input.value, n);
+      if (value === null) {
+        status.textContent = name + ": \"" + input.value + "\" is not a number or an expression in n, like n/3 or 3n/4.";
+        return null;
+      }
+      const rounded = Math.round(value);
+      if (rounded < low || rounded > n) {
+        status.textContent = name + " = " + input.value + " = " + rounded.toLocaleString("en-US") +
+          " for n = " + n.toLocaleString("en-US") + "; it must be from " + low + " to n.";
+        return null;
+      }
+      return rounded;
+    }
+    const half = Math.max(1, Math.round(n / 2));
+    const start = position(startInput, half, "start", 0);
+    if (start === null) return null;
+    const end = position(endInput, half, "end", 1);
+    if (end === null) return null;
+    const steps = field(stepsInput, 1, "steps", 1, MAX_STEPS);
+    if (steps === null) return null;
+    if (end < start) {
+      status.textContent = "end must be at least start.";
+      return null;
+    }
+    return { n, start, end, steps, tiebreaker: tiebreakerInput.value };
   }
 
-  // Inspect prefix: the form's submit, so Enter in the t box does it too.
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const n = readN();
-    if (n === null) return;
-    if (tInput.value === "") {
-      status.textContent = "Enter a prefix length t, 1 to " + n.toLocaleString("en-US") + ".";
-      tInput.focus();
-      return;
-    }
-    const t = Number(tInput.value);
-    if (!(Number.isInteger(t) && t >= 1 && t <= n)) {
-      status.textContent = "t must be a whole number from 1 to n.";
-      return;
-    }
-
-    inspectButton.disabled = true;
-    status.textContent = "Running…";
-    simulation(simRun.value, n, t)
-      .then((payload) => {
-        status.textContent = "";
-        show(payload);
-      })
-      .catch((error) => {
-        status.textContent = "Simulation failed: " + error.message;
-      })
-      .finally(() => {
-        inspectButton.disabled = false;
-      });
-  });
-
-  simulateButton.addEventListener("click", () => {
-    const n = readN();
-    if (n === null) return;
+    const range = readForm();
+    if (range === null) return;
     status.textContent = "";
-    loadPlayer(n);
+    load(simRun.value, range);
     player.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 
-  // -- table --------------------------------------------------------------
+  // -- loading ----------------------------------------------------------------
 
-  // The minimum of delta * lambda is the minimum of qc, and exact: delta is a
-  // multiple of 1/2. Ties go to the smaller delta, the first one tried.
-  function bestIndex(deltas) {
-    let best = 0;
-    deltas.forEach((row, i) => {
-      if (row.delta * row.lambda < deltas[best].delta * deltas[best].lambda) best = i;
-    });
-    return best;
+  let frames = [];      // {t, sim, segments: {k: segments}} per prefix, sim null until it arrives
+  let frameIndex = 0;
+  let selected = 0;     // index into the frame's deltas of the delta drawn
+  let view = null;      // [lowest key, highest key] shown, or null for 1..n
+  let current = null;   // {run, n, tiebreaker}: the simulation shown
+  let reader = null;    // the stream still arriving, cancelled when replaced
+  let timer = null;
+
+  // Reads the server's stream: a line with the prefix lengths, then a line per
+  // prefix as it finishes, in any order.
+  async function load(run, { n, start, end, steps, tiebreaker }) {
+    pause();
+    if (reader) reader.cancel().catch(() => {});
+    const mine = current = { run, n, tiebreaker };
+    reader = null;
+    frames = [];
+    frameIndex = 0;
+    view = null;
+    player.hidden = false;
+    playerHeading.textContent = "Optimal segments as the prefix grows - run " + run +
+      ", n = " + n.toLocaleString("en-US") + ", " + steps + " steps from " +
+      start.toLocaleString("en-US") + " to " + end.toLocaleString("en-US");
+    frameLabel.textContent = "Starting…";
+    body.textContent = "";
+    stop.textContent = "";
+    command.textContent = "";
+    plotHeading.textContent = "";
+
+    const query = "?run=" + run + "&n=" + n + "&start=" + start + "&end=" + end + "&steps=" + steps +
+      "&tiebreaker=" + tiebreaker;
+    try {
+      const response = await fetch("/api/simulate/" + encodeURIComponent(experiment) + query);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || response.statusText);
+      }
+      const stream = reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await stream.read();
+        if (current !== mine) {  // replaced by another simulation
+          stream.cancel().catch(() => {});
+          return;
+        }
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let cut;
+        while ((cut = buffer.indexOf("\n")) >= 0) {
+          receive(JSON.parse(buffer.slice(0, cut)));
+          buffer = buffer.slice(cut + 1);
+        }
+      }
+      if (frames.some((f) => !f.sim && !f.error)) throw new Error("the connection closed early");
+    } catch (error) {
+      if (current === mine) frameLabel.textContent = "Simulation failed: " + error.message;
+    } finally {
+      if (current === mine) reader = null;
+    }
+  }
+
+  function receive(line) {
+    if (line.ts) {
+      frames = line.ts.map((t) => ({ t, sim: null, error: null, segments: {} }));
+      frameSlider.max = frames.length - 1;
+      play();
+      return;
+    }
+    const frame = frames.find((f) => f.t === line.t);
+    if (!frame) return;
+    if (line.error) frame.error = line.error;
+    else {
+      frame.sim = line.payload;
+      frame.segments[frame.sim.best_k] = frame.sim.segments;
+    }
+    if (frame === frames[frameIndex]) showFrame();
+  }
+
+  // -- player -----------------------------------------------------------------
+
+  function pause() {
+    clearInterval(timer);
+    timer = null;
+    playButton.textContent = "Play";
+  }
+
+  function play() {
+    if (timer || !frames.length) return;
+    if (frameIndex === frames.length - 1) frameIndex = 0;  // replay from the start
+    playButton.textContent = "Pause";
+    showFrame();
+    timer = setInterval(() => {
+      // Wait on a frame still loading rather than skip it.
+      const frame = frames[frameIndex];
+      if (!frame || (!frame.sim && !frame.error)) return;
+      if (frameIndex === frames.length - 1) return pause();
+      frameIndex += 1;
+      showFrame();
+    }, FRAME_MS);
+  }
+
+  playButton.addEventListener("click", () => (timer ? pause() : play()));
+
+  // Stepping, by the buttons or the keys: left and right move through the
+  // prefixes (each opens on its best delta), up and down through the current
+  // prefix's deltas, a row at a time as the table shows them.
+  function stepFrame(by) {
+    if (!frames.length) return;
+    pause();
+    frameIndex = Math.min(frames.length - 1, Math.max(0, frameIndex + by));
+    showFrame();
+  }
+
+  function stepDelta(by) {
+    const frame = shownFrame();
+    if (!frame) return;
+    const i = Math.min(frame.sim.deltas.length - 1, Math.max(0, selected + by));
+    if (i === selected) return;
+    pick(i);
+    const row = body.rows[i];
+    const wrap = body.closest(".table-wrap");
+    if (row.offsetTop < wrap.scrollTop + row.offsetHeight ||
+        row.offsetTop + row.offsetHeight > wrap.scrollTop + wrap.clientHeight) {
+      wrap.scrollTop = row.offsetTop - wrap.clientHeight / 2;
+    }
+  }
+
+  document.getElementById("player-prev").addEventListener("click", () => stepFrame(-1));
+  document.getElementById("player-next").addEventListener("click", () => stepFrame(1));
+
+  const KEYS = { ArrowLeft: () => stepFrame(-1), ArrowRight: () => stepFrame(1),
+                 ArrowUp: () => stepDelta(-1), ArrowDown: () => stepDelta(1) };
+  document.addEventListener("keydown", (event) => {
+    const action = KEYS[event.key];
+    if (!action || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    // Only on the Simulate tab with something loaded, and not while typing in
+    // a field or moving a slider or picker, which have their own arrow keys.
+    if (player.hidden || player.closest("[hidden]")) return;
+    if (event.target.closest("input, select, textarea")) return;
+    event.preventDefault();
+    action();
+  });
+  frameSlider.addEventListener("input", () => {
+    pause();
+    frameIndex = Number(frameSlider.value);
+    showFrame();
+  });
+
+  // -- one frame: its table and plot -----------------------------------------
+
+  // The best row: the program's own pick, so ties go the run's --tiebreaker way.
+  function bestIndex(sim) {
+    const i = sim.deltas.findIndex((row) => row.k === sim.best_k);
+    return i < 0 ? 0 : i;
   }
 
   function formatDelta(delta) {
     return delta.toLocaleString("en-US");
   }
 
-  function show(payload) {
-    data = payload;
-    const best = bestIndex(data.deltas);
-    const winner = data.deltas[best];
+  // Draws the current frame from the start: its table, the best delta selected.
+  function showFrame() {
+    const frame = frames[frameIndex];
+    if (!frame) return;
+    frameSlider.value = frameIndex;
+    const head = "t = " + frame.t.toLocaleString("en-US") + "  (" + (frameIndex + 1) + " of " + frames.length + ")";
+    if (!frame.sim) {
+      frameLabel.textContent = head + (frame.error ? " - failed: " + frame.error : " - loading…");
+      // Not the previous frame's table and plot under this frame's label.
+      body.textContent = "";
+      stop.textContent = "";
+      command.textContent = "";
+      plotHeading.textContent = "";
+      canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    const sim = frame.sim;
+    const best = bestIndex(sim);
+    const winner = sim.deltas[best];
     selected = best;
-    view = null;
-    segments = { [data.best_k]: data.segments };
-
-    summary.textContent =
-      "run " + data.run + " · seed " + data.seed +
-      " · n = " + data.n.toLocaleString("en-US") +
-      " · t = " + data.t.toLocaleString("en-US") +
-      " — best δ = " + formatDelta(winner.delta) +
-      ", λ = " + winner.lambda.toLocaleString("en-US") +
-      ", qc = " + winner.qc.toFixed(3);
+    frameLabel.textContent = head + " - best δ = " + formatDelta(winner.delta) +
+      ", λ = " + winner.lambda.toLocaleString("en-US") + ", qc = " + winner.qc.toFixed(3);
 
     body.textContent = "";
-    data.deltas.forEach((row, i) => {
+    sim.deltas.forEach((row, i) => {
       const tr = document.createElement("tr");
       if (i === best) tr.classList.add("best");
       for (const text of [formatDelta(row.delta), row.lambda.toLocaleString("en-US"), row.qc.toFixed(3)]) {
@@ -180,60 +414,59 @@ function setupSimulate(experiment, runs, sizes) {
 
     // Why the search stopped: lambda >= 1, so qc >= log2(delta) for every
     // larger delta, and at the next delta that already reaches the best.
-    const next = data.deltas[data.deltas.length - 1].delta + 0.5;
-    stop.textContent =
-      data.deltas.length + " values of δ tried, stopped after δ = " + formatDelta(next - 0.5) +
-      ": every δ ≥ " + formatDelta(next) + " has qc ≥ log₂δ ≥ " + Math.log2(next).toFixed(3) +
-      ", no lower than the best, " + winner.qc.toFixed(3) + ".";
-    command.textContent = data.command;
+    const next = sim.deltas[sim.deltas.length - 1].delta + 0.5;
+    stop.textContent = sim.deltas.length + " values of δ tried; every δ ≥ " + formatDelta(next) +
+      " has qc ≥ log₂δ ≥ " + Math.log2(next).toFixed(3) + ", no lower than the best.";
+    command.textContent = sim.command;
 
-    result.hidden = false;
-    intro.hidden = true;
     markSelected();
     draw();
 
     // Bring the best row into view in the scrolling table, not the page.
     const wrap = body.closest(".table-wrap");
-    const row = body.rows[best];
-    wrap.scrollTop = row.offsetTop - wrap.clientHeight / 2;
+    wrap.scrollTop = body.rows[best].offsetTop - wrap.clientHeight / 2;
   }
 
-  // Draws another delta, fetching its segments the first time.
+  // Draws another delta of the current frame, fetching its segments the first
+  // time. Pauses, so the frame stays while it is looked at.
   function pick(i) {
+    pause();
+    const frame = frames[frameIndex];
     selected = i;
     markSelected();
-    const k = data.deltas[i].k;
-    if (segments[k]) return draw();
+    const k = frame.sim.deltas[i].k;
+    if (frame.segments[k]) return draw();
 
     draw();  // the points, until the segments arrive
-    const asked = data;
-    const query = "?run=" + data.run + "&n=" + data.n + "&t=" + data.t + "&k=" + k;
+    const query = "?run=" + current.run + "&n=" + current.n + "&t=" + frame.t + "&k=" + k +
+      "&tiebreaker=" + current.tiebreaker;
     fetch("/api/simulate/" + encodeURIComponent(experiment) + query)
       .then((response) => response.json().then((payload) => {
         if (!response.ok) throw new Error(payload.error || response.statusText);
         return payload;
       }))
       .then((payload) => {
-        if (asked !== data) return;  // a new simulation has replaced this one
-        segments[k] = payload.segments;
-        markSelected();
-        draw();
+        frame.segments[k] = payload.segments;
+        if (frame === frames[frameIndex]) {
+          markSelected();
+          draw();
+        }
       })
       .catch((error) => {
-        if (asked === data) plotHeading.textContent += " — could not load: " + error.message;
+        if (frame === frames[frameIndex]) plotHeading.textContent += " - could not load: " + error.message;
       });
   }
 
   function markSelected() {
+    const frame = frames[frameIndex];
     [...body.rows].forEach((tr, i) => tr.classList.toggle("selected", i === selected));
-    const row = data.deltas[selected];
+    const row = frame.sim.deltas[selected];
     plotHeading.textContent = "δ = " + formatDelta(row.delta) + ", λ = " +
-      row.lambda.toLocaleString("en-US") + " segments" + (segments[row.k] ? "" : " — loading…");
+      row.lambda.toLocaleString("en-US") + " segments" + (frame.segments[row.k] ? "" : " - loading…");
   }
 
-  // -- plot -----------------------------------------------------------------
+  // -- plot -------------------------------------------------------------------
 
-  const MARGIN = { left: 92, right: 16, top: 12, bottom: 40 };  // left: room for 1,048,576
   let drag = null;  // [start, current] in css pixels, while selecting a range
 
   function colour(name) {
@@ -286,34 +519,6 @@ function setupSimulate(experiment, runs, sizes) {
       py: (y) => margin.top + (1 - (y - y0) / (y1 - y0)) * plotHeight,
       key: (px) => x0 + (px - margin.left) / plotWidth * (x1 - x0),
     };
-  }
-
-  function geometry() {
-    return geometryFor(canvas, data.keys, data.deltas[selected].delta, view, MARGIN);
-  }
-
-  // Hide segments: one setting for both plots, so the keys alone can be seen.
-  let segmentsShown = true;
-  const segmentToggles = document.querySelectorAll(".segments-toggle");
-  for (const button of segmentToggles) {
-    button.addEventListener("click", () => {
-      segmentsShown = !segmentsShown;
-      for (const b of segmentToggles) {
-        b.textContent = segmentsShown ? "Hide segments" : "Show segments";
-        b.setAttribute("aria-pressed", String(!segmentsShown));
-        b.classList.toggle("active", !segmentsShown);
-      }
-      draw();
-      drawFrame();
-    });
-  }
-
-  // The main plot: the selected delta of the last simulation.
-  function draw() {
-    if (!data || result.hidden) return;
-    const row = data.deltas[selected];
-    const segs = segmentsShown ? segments[row.k] || [] : [];
-    render(canvas, data.keys, segs, row.delta, view, MARGIN, drag);
   }
 
   // Draws keys against rank on one canvas, with each segment's line and its
@@ -437,7 +642,42 @@ function setupSimulate(experiment, runs, sizes) {
     context.strokeRect(margin.left + 0.5, margin.top + 0.5, g.plotWidth, g.plotHeight);
   }
 
-  // -- zoom -------------------------------------------------------------------
+
+  function shownFrame() {
+    const frame = frames[frameIndex];
+    return frame && frame.sim ? frame : null;
+  }
+
+  // Keys over 1..n unless zoomed, so the prefix is seen filling in.
+  function range() {
+    return view || [1, current.n];
+  }
+
+  function geometry() {
+    const frame = shownFrame();
+    return geometryFor(canvas, frame.sim.keys, frame.sim.deltas[selected].delta, range(), MARGIN);
+  }
+
+  // Hide segments, so the keys alone can be seen.
+  let segmentsShown = true;
+  const segmentToggle = document.querySelector("#sim-player .segments-toggle");
+  segmentToggle.addEventListener("click", () => {
+    segmentsShown = !segmentsShown;
+    segmentToggle.textContent = segmentsShown ? "Hide segments" : "Show segments";
+    segmentToggle.setAttribute("aria-pressed", String(!segmentsShown));
+    segmentToggle.classList.toggle("active", !segmentsShown);
+    draw();
+  });
+
+  function draw() {
+    const frame = shownFrame();
+    if (!frame || player.hidden) return;
+    const row = frame.sim.deltas[selected];
+    const segs = segmentsShown ? frame.segments[row.k] || [] : [];
+    render(canvas, frame.sim.keys, segs, row.delta, range(), MARGIN, drag);
+  }
+
+  // -- zoom: drag a range of keys, double-click for all of 1..n ---------------
 
   function offsetX(event) {
     const box = canvas.getBoundingClientRect();
@@ -446,7 +686,7 @@ function setupSimulate(experiment, runs, sizes) {
   }
 
   canvas.addEventListener("mousedown", (event) => {
-    if (!data) return;
+    if (!shownFrame()) return;
     const x = offsetX(event);
     drag = [x, x];
     event.preventDefault();
@@ -471,142 +711,15 @@ function setupSimulate(experiment, runs, sizes) {
     draw();
   });
 
-  // -- Simulate: the optimal segments as the prefix grows ---------------------
-  //
-  // Plays t = n/8, n/4, ..., n for the run and n in the form: one plot, stepping
-  // through the prefixes, the keys and the best delta's segments redrawn at
-  // each. Every simulation is cached, so replaying and scrubbing do not ask the
-  // server again.
-
-  const player = document.getElementById("sim-player");
-  const playerHeading = document.getElementById("player-heading");
-  const playButton = document.getElementById("player-play");
-  const frameSlider = document.getElementById("player-frame");
-  const frameLabel = document.getElementById("player-label");
-  const openButton = document.getElementById("player-open");
-  const playerCanvas = document.getElementById("player-plot");
-  const PLAYER_MARGIN = { left: 92, right: 16, top: 12, bottom: 40 };
-  const FRAME_MS = 1400;
-
-  let frames = [];         // {i, t, sim} per prefix, sim null until loaded
-  let frameIndex = 0;
-  let playerKey = null;    // "run:n" the player shows
-  let playerN = 0;
-  let timer = null;
-
-  // t = i n / 8 for i = 1..8; for n < 8 some coincide, and are shown once.
-  function prefixes(n) {
-    const out = [];
-    for (let i = 1; i <= 8; i++) {
-      const t = Math.max(1, Math.round(i * n / 8));
-      if (!out.some((p) => p.t === t)) out.push({ i, t });
-    }
-    return out;
-  }
-
-  function fraction(i) {
-    return { 1: "n/8", 2: "n/4", 3: "3n/8", 4: "n/2", 5: "5n/8", 6: "3n/4", 7: "7n/8", 8: "n" }[i];
-  }
-
-  function drawFrame() {
-    const frame = frames[frameIndex];
-    if (!frame) return;
-    frameSlider.value = frameIndex;
-    const head = "t = " + fraction(frame.i) + " = " + frame.t.toLocaleString("en-US");
-    if (!frame.sim) {
-      frameLabel.textContent = head + " — loading…";
-      openButton.disabled = true;
-      return;
-    }
-    const winner = frame.sim.deltas[bestIndex(frame.sim.deltas)];
-    frameLabel.textContent = head + " — best δ = " + formatDelta(winner.delta) +
-      ", λ = " + winner.lambda.toLocaleString("en-US") + ", qc = " + winner.qc.toFixed(3);
-    openButton.disabled = false;
-    // Keys across 1..n in every frame, so the prefix is seen filling in.
-    const segs = segmentsShown ? frame.sim.segments : [];
-    render(playerCanvas, frame.sim.keys, segs, winner.delta, [1, playerN], PLAYER_MARGIN, null);
-  }
-
-  function pause() {
-    clearInterval(timer);
-    timer = null;
-    playButton.textContent = "Play";
-  }
-
-  function play() {
-    if (timer) return;
-    if (frameIndex === frames.length - 1) frameIndex = 0;  // replay from the start
-    playButton.textContent = "Pause";
-    drawFrame();
-    timer = setInterval(() => {
-      // Wait on a frame still loading rather than skip it.
-      if (!frames[frameIndex] || !frames[frameIndex].sim) return;
-      if (frameIndex === frames.length - 1) return pause();
-      frameIndex += 1;
-      drawFrame();
-    }, FRAME_MS);
-  }
-
-  // Loads (from the cache where it can) and plays, from the start, the
-  // prefixes of n for the run in the form.
-  function loadPlayer(n) {
-    const run = simRun.value;
-    const key = run + ":" + n;
-    playerKey = key;
-    playerN = n;
-
-    pause();
-    playerHeading.textContent = "Optimal segments as the prefix grows — run " + run +
-      ", n = " + n.toLocaleString("en-US");
-    frames = prefixes(n).map(({ i, t }) => ({ i, t, sim: null }));
-    frameIndex = 0;
-    frameSlider.max = frames.length - 1;
-    player.hidden = false;
-    for (const frame of frames) {
-      simulation(run, n, frame.t)
-        .then((payload) => {
-          if (playerKey !== key) return;  // replaced by another run or n
-          frame.sim = payload;
-          if (frame === frames[frameIndex]) drawFrame();
-        })
-        .catch((error) => {
-          if (playerKey === key && frame === frames[frameIndex]) {
-            frameLabel.textContent += " failed: " + error.message;
-          }
-        });
-    }
-    play();
-  }
-
-  playButton.addEventListener("click", () => (timer ? pause() : play()));
-  frameSlider.addEventListener("input", () => {
-    pause();
-    frameIndex = Number(frameSlider.value);
-    drawFrame();
-  });
-  openButton.addEventListener("click", () => {
-    const frame = frames[frameIndex];
-    if (!frame || !frame.sim) return;
-    pause();
-    tInput.value = frame.t;
-    show(frame.sim);
-    result.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
   new ResizeObserver(draw).observe(canvas);
-  new ResizeObserver(drawFrame).observe(playerCanvas);
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    draw();
-    drawFrame();
-  });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
 
   // Until something has been simulated, opening the tab takes the run and n
   // the Plots tab shows; after that it keeps the inputs as they were.
   return {
     shown() {
-      if (!data && !playerKey) prefill();
+      if (!current) prefill();
       draw();
-      drawFrame();
     },
   };
 }

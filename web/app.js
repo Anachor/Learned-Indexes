@@ -4,7 +4,7 @@
 
 const name = decodeURIComponent(location.pathname.split("/").filter(Boolean)[1] || "");
 
-const title = document.getElementById("title");
+const experimentPicker = document.getElementById("experiment");
 const pickers = document.getElementById("pickers");
 const runPicker = document.getElementById("run");
 const nPicker = document.getElementById("n");
@@ -17,8 +17,10 @@ let data = null;
 let tab = "plots";        // the open tab: "plots" or "simulate"
 let simulation = null;    // setupSimulate's handle, when the experiment has one
 
-document.title = name + " - results";
-title.textContent = name;
+// The experiment picker sits in the header, so it governs both tabs. Until the
+// listing arrives it holds this experiment alone - the directory name, which the
+// URL carries, until the label is known.
+setExperiment(name);
 
 // -- url hash, so a selection can be linked and survives a reload -----------
 
@@ -51,6 +53,15 @@ function fill(select, choices, chosen) {
   }
   select.value = String(chosen);
   select.disabled = choices.length === 0;
+}
+
+// The name shown for this experiment, in the header picker and the tab title.
+// The picker may still be holding this experiment alone, before the listing.
+function setExperiment(label) {
+  document.title = label + " - results";
+  const option = [...experimentPicker.options].find((choice) => choice.value === name);
+  if (option) option.textContent = label;
+  else fill(experimentPicker, [[name, label]], name);
 }
 
 function sizes(run) {
@@ -104,6 +115,17 @@ function describePermutation(spec) {
   }
   if (kind === "blocks") {
     return "blocks of " + values[0] + " consecutive keys; the blocks in random order, and the keys within each block in random order";
+  }
+  if (kind === "bitrev") {
+    const swaps = values[0] && Number(values[0]) > 0 ? values[0] : null;
+    return (swaps ? "almost sorted (" + swaps + "·n swaps of two random positions)" : "sorted") +
+      ", then each position's bits reversed - the van der Corput order, every prefix spread evenly over the keys" +
+      (swaps ? "; the swaps move it toward uniform" : "");
+  }
+  if (kind === "zipf" && values[2] && values[2] !== "1") {
+    return "recursive, " + values[2] + " levels: the keys split into " + values[0] + " equal regions, each of those into " +
+      values[0] + " again, and so on; each insert picks a region at every level with weight 1/rank^" + values[1] +
+      " (ranks shuffled in every region), then a random key in the smallest - hot and cold areas at every scale";
   }
   if (kind === "zipf") {
     return "the keys split into " + values[0] + " equal regions; each insert picks a region with weight 1/rank^" +
@@ -169,7 +191,16 @@ function renderRunMeta(run) {
   if (meta.permutation) {
     row("permutation", code(meta.permutation), aside(describePermutation(meta.permutation)));
   }
+  if (meta.structure) row("structure", meta.structure);
   if (meta.cost) row("cost", pretty(meta.cost));
+  // Runs from before --tiebreaker have no field: they broke ties the mindelta
+  // way, which the backfill wrote into their meta.json, so the fallback is only
+  // for a file that somehow still lacks it - not today's minlambda default.
+  const tiebreaker = meta.tiebreaker || "mindelta";
+  row("tiebreaker", code(tiebreaker),
+      aside((tiebreaker === "minlambda" ? "on equal qc, the fewest segments (largest δ)"
+                                        : "on equal qc, the smallest δ") +
+            (meta.tiebreaker ? "" : "; not in meta.json, what runs before the option did")));
   const time = runTime(meta);
   if (time) row("time", time);
   if (meta.commit) {
@@ -281,7 +312,25 @@ for (const button of tabs.querySelectorAll("[data-tab]")) {
 runPicker.addEventListener("change", render);
 nPicker.addEventListener("change", render);
 
+// Another experiment has its own runs and n values, and its own program behind
+// the Simulate tab, so it is a fresh page; only the open tab carries over.
+experimentPicker.addEventListener("change", () => {
+  location.href = "/exp/" + encodeURIComponent(experimentPicker.value) +
+    (tab === "plots" ? "" : "#tab=" + tab);
+});
+
 // -- load ------------------------------------------------------------------
+
+// The listing, for the header picker's other entries. It is a second request:
+// the experiment's own payload does not know what else exists. Failing it only
+// costs the picker its other options, so the page carries on without it.
+fetch("/api/experiments")
+  .then((response) => (response.ok ? response.json() : []))
+  .then((listing) => {
+    if (!listing.some((entry) => entry.name === name)) return;
+    fill(experimentPicker, listing.map((entry) => [entry.name, entry.label || entry.name]), name);
+  })
+  .catch(() => {});
 
 fetch("/api/experiments/" + encodeURIComponent(name))
   .then((response) => {
@@ -294,8 +343,7 @@ fetch("/api/experiments/" + encodeURIComponent(name))
     // The server knows the display name (exp1 -> "Experiment 1"); the URL
     // only carries the directory name.
     const label = data.label || name;
-    document.title = label + " - results";
-    title.textContent = label;
+    setExperiment(label);
 
     if (!data.runs.length) {
       message("No runs for " + label + " yet.");

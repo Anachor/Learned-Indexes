@@ -17,6 +17,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
@@ -38,6 +40,12 @@ NUMBERED = re.compile(r"^exp(?P<number>\d+)$")
 SIMULATE_MAX_N = 1 << 24
 SIMULATE_MAX_T = 1 << 20
 SIMULATE_TIMEOUT = 120  # seconds
+# A simulation is 1..SIMULATE_MAX_STEPS prefixes, and at most SIMULATE_WORKERS
+# simulate processes run at once across all requests - more wait their turn -
+# so neither one request nor many at once can swamp the machine.
+SIMULATE_MAX_STEPS = 100
+SIMULATE_WORKERS = 4
+SLOTS = threading.BoundedSemaphore(SIMULATE_WORKERS)
 
 PAGES = {"index": "index.html", "experiment": "experiment.html"}
 TYPES = {".html": "text/html; charset=utf-8",
@@ -161,8 +169,16 @@ def tables(root, experiment, run):
     return found
 
 
+# The experiments whose program has --simulate; the Simulate tab is only shown
+# for these.
+SIMULATES = {"exp1"}
+
+
 def binary(root, experiment):
-    """The experiment's compiled program, experiments/<exp>/<exp>, or None."""
+    """The experiment's compiled program, experiments/<exp>/<exp>, or None when
+    it is not built or has no --simulate."""
+    if experiment not in SIMULATES:
+        return None
     path = os.path.join(root, "experiments", experiment, experiment)
     return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
 
@@ -199,18 +215,28 @@ def base_seed(root, experiment, run):
     return None
 
 
-PERMUTATION = re.compile(r"^(uniform|probing|blocks:\d+|zipf:\d+,[0-9.eE+-]+)$")
+PERMUTATION = re.compile(r"^(uniform|probing|bitrev(:[0-9.eE+-]+)?|blocks:\d+|zipf:\d+,[0-9.eE+-]+(,\d+)?)$")
 
 
 def permutation(root, experiment, run):
-    """The run's --permutation spec from its meta.json; "uniform" when it has
-    none, or none that exp1 would accept."""
+    """The run's --permutation spec from its meta.json: "uniform" when it names
+    none (runs from before the option), None when it names one exp1 no longer
+    accepts - simulating that as uniform would show the wrong keys."""
     meta = metadata(root, experiment, run) or {}
     spec = meta.get("permutation")
-    return spec if isinstance(spec, str) and PERMUTATION.match(spec) else "uniform"
+    if spec is None:
+        return "uniform"
+    return spec if isinstance(spec, str) and PERMUTATION.match(spec) else None
 
 
-def simulate(root, experiment, run, n, t, k=None):
+# The Simulate tab's tiebreaker when the page does not pick one: the fewest
+# segments, the experiments' own default. The runs so far used mindelta, so on a
+# tie its best delta can differ from their figures - qc never does.
+TIEBREAKERS = ("minlambda", "mindelta")
+DEFAULT_TIEBREAKER = "minlambda"
+
+
+def simulate(root, experiment, run, n, t, k=None, tiebreaker=DEFAULT_TIEBREAKER):
     """Runs <exp> --simulate on one prefix: (payload, None) or (None, error).
 
     Without k: the keys, the table of every delta tried, and the best delta's
@@ -227,13 +253,21 @@ def simulate(root, experiment, run, n, t, k=None):
     # The run's insertion order, so the simulation rebuilds its keys. Runs
     # without one in their meta.json predate the option and are uniform.
     order = permutation(root, experiment, run)
+    if order is None:
+        spec = (metadata(root, experiment, run) or {}).get("permutation")
+        return None, f"run {run}'s permutation {spec!r} is not one {experiment} can rebuild any more"
     order_flag = ["--permutation", order] if order != "uniform" else []
+    order_flag += ["--tiebreaker", tiebreaker]
     tail = order_flag + ["-n", str(n), str(seed)]
     command = [program, "--simulate", str(t)] + mode + tail
+    if not SLOTS.acquire(timeout=SIMULATE_TIMEOUT):
+        return None, "the server is busy with other simulations - try again shortly"
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=SIMULATE_TIMEOUT)
     except subprocess.TimeoutExpired:
         return None, f"simulation took longer than {SIMULATE_TIMEOUT} s"
+    finally:
+        SLOTS.release()
     if done.returncode != 0:
         return None, (done.stderr.strip().splitlines() or ["simulation failed"])[0]
     payload = json.loads(done.stdout)
@@ -243,6 +277,19 @@ def simulate(root, experiment, run, n, t, k=None):
         payload["command"] = " ".join([f"experiments/{experiment}/{experiment}",
                                        "--simulate", str(t)] + tail)
     return payload, None
+
+
+def prefix_lengths(start, end, steps):
+    """The prefixes a simulation plays: t = start + j (end - start) / steps for
+    j = 0..steps, rounded - start and end included, so steps + 1 of them, or just
+    one when start = end. t = 0, the empty prefix, is left out, and any that
+    coincide after rounding are shown once."""
+    out = []
+    for j in range(steps + 1):
+        t = round(start + j * (end - start) / steps)
+        if t >= 1 and t not in out:
+            out.append(t)
+    return out
 
 
 def summary(root):
@@ -420,7 +467,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1] not in experiments(self.root):
                 return self.send_missing(f"no experiment {parts[1]!r}")
             return self.send_json(detail(self.root, parts[1]))
-        # /api/simulate/<exp>?run=R&n=N&t=T[&k=K]
+        # /api/simulate/<exp>?run=R&n=N&start=S&end=E&steps=K: the prefixes played
+        # /api/simulate/<exp>?run=R&n=N&t=T&k=K: one prefix's segments for one k
         if len(parts) == 2 and parts[0] == "simulate":
             return self.simulate(parts[1], query)
         return self.send_missing()
@@ -428,23 +476,65 @@ class Handler(BaseHTTPRequestHandler):
     def simulate(self, experiment, query):
         if experiment not in experiments(self.root):
             return self.send_missing(f"no experiment {experiment!r}")
+        segments = "k" in query
+        keys = ("run", "n", "t", "k") if segments else ("run", "n", "start", "end", "steps")
+        tiebreaker = query.get("tiebreaker", [DEFAULT_TIEBREAKER])[0]
+        if tiebreaker not in TIEBREAKERS:
+            return self.send_json({"error": "tiebreaker must be " + " or ".join(TIEBREAKERS)}, status=400)
         try:
-            run, n, t = (int(query[key][0]) for key in ("run", "n", "t"))
-            k = int(query["k"][0]) if "k" in query else None
+            values = {key: int(query[key][0]) for key in keys}
         except (KeyError, ValueError):
-            return self.send_json({"error": "run, n, t and k must be integers"}, status=400)
-        if k is not None and not 1 <= k <= 2 * n:
-            return self.send_json({"error": f"k must be 1 to {2 * n}"}, status=400)
+            return self.send_json({"error": ", ".join(keys) + " must be integers"}, status=400)
+        run, n = values["run"], values["n"]
         if run not in runs(self.root, experiment):
             return self.send_missing(f"no run {run}")
         if not 1 <= n <= SIMULATE_MAX_N:
             return self.send_json({"error": f"n must be 1 to {SIMULATE_MAX_N}"}, status=400)
-        if not 1 <= t <= min(n, SIMULATE_MAX_T):
-            return self.send_json({"error": f"t must be 1 to {min(n, SIMULATE_MAX_T)}"}, status=400)
-        payload, error = simulate(self.root, experiment, run, n, t, k)
-        if error:
-            return self.send_json({"error": error}, status=500)
-        return self.send_json(payload)
+        top = min(n, SIMULATE_MAX_T)
+
+        if segments:
+            t, k = values["t"], values["k"]
+            if not 1 <= t <= top:
+                return self.send_json({"error": f"t must be 1 to {top}"}, status=400)
+            if not 1 <= k <= 2 * n:
+                return self.send_json({"error": f"k must be 1 to {2 * n}"}, status=400)
+            payload, error = simulate(self.root, experiment, run, n, t, k, tiebreaker)
+            if error:
+                return self.send_json({"error": error}, status=500)
+            return self.send_json(payload)
+
+        start, end, steps = values["start"], values["end"], values["steps"]
+        if not (0 <= start <= end <= top and end >= 1):
+            return self.send_json({"error": f"need 0 <= start <= end <= {top}, end at least 1"}, status=400)
+        if not 1 <= steps <= SIMULATE_MAX_STEPS:
+            return self.send_json({"error": f"steps must be 1 to {SIMULATE_MAX_STEPS}"}, status=400)
+        self.stream_simulation(experiment, run, n, prefix_lengths(start, end, steps), tiebreaker)
+
+    def stream_simulation(self, experiment, run, n, ts, tiebreaker):
+        """One JSON object per line: first {"ts": [...]}, the prefixes to play,
+        then {"t", "payload"} or {"t", "error"} for each as it finishes, so the
+        page can show the early ones while the rest compute."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def line(obj):
+            self.wfile.write((json.dumps(obj) + "\n").encode())
+            self.wfile.flush()
+
+        try:
+            line({"ts": ts})
+            with ThreadPoolExecutor(max_workers=SIMULATE_WORKERS) as pool:
+                futures = {pool.submit(simulate, self.root, experiment, run, n, t, None, tiebreaker): t
+                           for t in ts}
+                for future in as_completed(futures):
+                    payload, error = future.result()
+                    line({"t": futures[future], "error": error} if error else
+                         {"t": futures[future], "payload": payload})
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the page moved on; the running simulations finish and are dropped
 
 
 def main():
