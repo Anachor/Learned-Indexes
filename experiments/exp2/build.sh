@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build experiments/exp1/exp1 with the git commit baked in, so every run's
+# Build experiments/exp2/exp2 with the git commit baked in, so every run's
 # meta.json records the code that produced it.
 #
-#   experiments/exp1/build.sh          (CXX overrides the compiler)
+#   experiments/exp2/build.sh          (CXX overrides the compiler)
 #
-# dirty is true when the code the results depend on - exp1.cpp, the shared
+# dirty is true when the code the results depend on - exp2.cpp, the shared
 # experiments/common/, src/ and third_party/ - has uncommitted changes,
 # untracked files included. Changes elsewhere (plots, the web server, notes) do
 # not affect results, so they do not count.
@@ -19,7 +19,7 @@ cd "$ROOT"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 if [ "$COMMIT" = unknown ]; then
     DIRTY=unknown
-elif [ -n "$(git status --porcelain -- experiments/exp1/exp1.cpp experiments/common src third_party)" ]; then
+elif [ -n "$(git status --porcelain -- experiments/exp2/exp2.cpp experiments/common src third_party)" ]; then
     DIRTY=true
 else
     DIRTY=false
@@ -27,6 +27,6 @@ fi
 
 "$CXX" -std=c++17 -O2 -fopenmp \
     -DGIT_COMMIT="\"$COMMIT\"" -DGIT_DIRTY="\"$DIRTY\"" \
-    experiments/exp1/exp1.cpp -o experiments/exp1/exp1
+    experiments/exp2/exp2.cpp -o experiments/exp2/exp2
 
-echo "built experiments/exp1/exp1 (commit $COMMIT, dirty $DIRTY, $("$CXX" --version | head -1))"
+echo "built experiments/exp2/exp2 (commit $COMMIT, dirty $DIRTY, $("$CXX" --version | head -1))"

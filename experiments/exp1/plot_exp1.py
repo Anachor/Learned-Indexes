@@ -7,7 +7,8 @@ One folder per n, n<N>/, with three figures against the prefix length t:
   best_delta.png         the best delta and the lambda it gives
 
 and overall/, across n, each point a statistic over that n's prefixes:
-  query_complexity.png   the query complexity at the best delta: median, mean and max
+  query_complexity.png   the query complexity at the best delta: median, mean and max,
+                         with the mean's least-squares fit a * lg n + b
   best_delta.png         the best delta: median, mean and max
 
 Query complexity is log2(lambda) + log2(delta), computed here from k and L
@@ -111,6 +112,16 @@ def statistics(best):
             for stat in STATISTICS}
 
 
+def fit_log(sizes, values):
+    """(a, b) minimising the squared error of values against a * log2(n) + b, over
+    the n plotted: the line the points make on this log2 x-axis. The intercept is
+    needed - the costs are straight in lg n but do not pass through the origin, and
+    forcing b = 0 tilts the slope."""
+    x = np.log2(np.asarray(sizes, dtype=float))
+    a, b = np.polyfit(x, values, 1)
+    return float(a), float(b)
+
+
 def n_axis(axis, sizes):
     axis.set_xscale("log", base=2)
     axis.set_xticks(sizes)
@@ -132,12 +143,18 @@ def plot_overall(summary, figures):
     sizes = sorted(summary)
     paths = []
 
-    def by_statistic(key, title, ylabel, name):
+    def by_statistic(key, title, ylabel, name, fit=False):
         fig, axis = plt.subplots(figsize=(9, 5))
         for stat in STATISTICS:
-            axis.plot(sizes, [summary[n][stat][key] for n in sizes],
-                      lw=1.5, marker="o", ms=4, color=STATISTIC_COLORS[stat],
-                      label=STATISTIC_NAMES[stat].lower())
+            values = [summary[n][stat][key] for n in sizes]
+            axis.plot(sizes, values, lw=1.5, marker="o", ms=4,
+                      color=STATISTIC_COLORS[stat], label=STATISTIC_NAMES[stat].lower())
+            # One fit only, on the mean: three would clutter, and the statistics
+            # are close enough that the mean's slope speaks for all of them.
+            if fit and stat == "mean":
+                a, b = fit_log(sizes, values)
+                axis.plot(sizes, [a * np.log2(n) + b for n in sizes], lw=1.2, ls="--",
+                          color="black", alpha=0.7, label=f"{a:.2f} lg n {b:+.2f}")
         axis.set_title(title)
         axis.set_ylabel(ylabel)
         n_axis(axis, sizes)
@@ -146,7 +163,7 @@ def plot_overall(summary, figures):
 
     by_statistic("best_cost", "Summary query complexity over prefixes, by n",
                  "query complexity at the best δ\nlog2(λ) + log2(δ)",
-                 "query_complexity.png")
+                 "query_complexity.png", fit=True)
     by_statistic("best_delta", "Summary optimal δ over prefixes, by n",
                  "optimal δ", "best_delta.png")
     return paths
