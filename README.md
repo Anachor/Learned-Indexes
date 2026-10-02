@@ -6,6 +6,7 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 
 - `notes/`: paper draft, experiment plan (`Notes.txt`), progress log (`workflow.md`)
 - `src/ORourke/`: O'Rourke interface (`orourke.hpp`) and implementations: PGM, ZLW, brute force
+- `src/PMA/`: the packed memory array (`pma.hpp`, C++20)
 - `tests/`: stress tests and speed comparison of the implementations
 - `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`;
   `experiments/common/` holds what they share (permutations, the best-delta search, run folders and `meta.json`)
@@ -33,6 +34,14 @@ git submodule update --init
     ```
     g++ -std=c++17 -O2 tests/orourke_speed.cpp -o tests/orourke_speed
     ./tests/orourke_speed -m METHOD -t T -n N [-d DELTA] [seed]
+    ```
+
+- **PMA** (`src/PMA/pma.hpp`, C++20): by default `tests/pma` runs the insertion workload: 2^20 keys (`-n`) for each order (`--orders`, default `uniform,zipf:16,1,sorted,reverse`), each run in a new folder `results/pma/<run>/` (`<order>.csv` and `meta.json`). The plot script writes `figures/pma/<run>/workload.png` (capacity, density, and keys moved and ns per insert, against n), with the same run modes as exp1. `--stress` checks random insert sequences against a `std::set` and the invariants after every insert, writing nothing.
+    ```
+    g++-11 -std=c++20 -O2 -DGIT_COMMIT="\"$(git rev-parse --short HEAD)\"" tests/pma.cpp -o tests/pma
+    ./tests/pma [-n N] [--orders O,O,...] [--out DIR] [seed]
+    ./tests/pma --stress [-i iterations] [-n MAXN] [seed]
+    python3 tests/plot_pma.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
     ```
 
 ## Experiment 1
@@ -140,7 +149,8 @@ and order give exp1's prefixes, and exp1's static best is the comparison.
 - **Plot**: per n, `query_complexity.png` (2a per delta, 2b, and exp1's static best
   when an exp1 run in `--exp1-results` has the same seed and permutation),
   `segments.png` (total lambda over levels) and `best_delta.png` (each build's own
-  delta, by level); across n, `overall/query_complexity.png` (2b) and
+  delta, one panel per level) and `average_best_delta.png` (its average per level, with exp1's best delta at t = 2^level dotted); across n, `overall/query_complexity.png` (2b, with
+  exp1's static best dashed where it matches) and
   `overall/overhead.png` (2b minus static best, when every n has a match).
   Same run modes as exp1.
 
@@ -154,6 +164,44 @@ and order give exp1's prefixes, and exp1's static best is the comparison.
 
     ```
     ./experiments/exp2/exp2 --validate -n 512 [seed]
+    ```
+
+## Experiment 3
+
+Experiment 1 on a PMA (`src/PMA/pma.hpp`, default parameters: leaf density 1,
+root 0.75, lazy growth): the keys are inserted into the PMA one at a time, and
+after every insert O'Rourke runs over its layout. The points are (key, slot),
+gaps included, so delta is in slots - the local search runs over the array.
+Same seeds (n uses seed + n), `--permutation` orders and `--tiebreaker` as exp1,
+so the same seed and order give exp1's prefixes, and exp1's static best - the
+same keys packed - is the comparison.
+
+- **Run**: writes one CSV per n to `results/exp3/<run>/`, a row per delta evaluated
+  (`seed,n,t,capacity,k,L,cost,fixed,best`, capacity = the PMA's after insert t),
+  and `meta.json` as exp1, with the PMA's parameters.
+
+    ```
+    experiments/exp3/build.sh           # C++20
+    ./experiments/exp3/exp3 [-n N,N,...] [-j THREADS] [--out DIR] [--permutation P] [--tiebreaker T] [seed]
+    ```
+
+- **Plot**: per n, `query_complexity.png` and `segments.png` as exp1 (with exp1's
+  static best when an exp1 run in `--exp1-results` has the same seed and
+  permutation) and `best_delta.png` (best delta, its lambda, and the PMA's density);
+  across n, `overall/query_complexity.png`, `overall/best_delta.png` and
+  `overall/overhead.png` (PMA best minus static best, when every n has a match).
+  Same run modes as exp1.
+
+    ```
+    python3 experiments/exp3/plot_exp3.py [--new | --latest | --all | --only=RUNS] [--exp1-results DIR]
+    ```
+
+- **Validate** (small n, writes nothing): at every prefix, the PMA's invariants and
+  contents, the best-delta search against trying every k, and the segment sizes
+  against brute force.
+
+    ```
+    ./experiments/exp3/exp3 --validate -n 512 [seed]
     ```
 
 ## Results server
