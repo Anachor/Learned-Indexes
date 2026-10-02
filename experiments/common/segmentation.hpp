@@ -6,6 +6,10 @@
 // the half-integers; the points go to O'Rourke as (key, 2*rank) with integer
 // bound k.
 //
+// Every function also takes y, the keys' positions when they are not their
+// ranks - exp3's PMA slots, gaps included: the points are then (key, y[i]),
+// sent as (key, 2*y[i]). y must be non-decreasing; null means the ranks.
+//
 //   query complexity = log2(delta) + log2(segment size), delta = k/2
 
 #include <algorithm>
@@ -55,13 +59,24 @@ struct Row {
 // the search does, exactly, in integers.
 inline double query_complexity(size_t L, int64_t k) { return std::log2(double(k) / 2) + std::log2(double(L)); }
 
-// Segment size of a sorted array under bound k, using y = 2*rank.
-inline size_t count_segments(ORourke<int64_t> &orourke, const std::vector<int64_t> &x, int64_t k) {
+// The position of x[i]: its rank, or y[i].
+inline int64_t position(const std::vector<int64_t> *y, size_t i) { return y ? (*y)[i] : int64_t(i); }
+
+// The smallest k at which one horizontal line, through the middle of the
+// positions, fits every point: their span, last minus first. At least 1.
+inline int64_t full_k(const std::vector<int64_t> &x, const std::vector<int64_t> *y) {
+    if (x.empty()) return 1;
+    return std::max<int64_t>(1, position(y, x.size() - 1) - position(y, 0));
+}
+
+// Segment size of a sorted array under bound k, using 2 * position.
+inline size_t count_segments(ORourke<int64_t> &orourke, const std::vector<int64_t> &x, int64_t k,
+                             const std::vector<int64_t> *y = nullptr) {
     if (x.empty()) return 0;
     orourke.reset(k);
     size_t segments = 1;
     for (size_t i = 0; i < x.size(); ++i) {
-        if (orourke.add_point(x[i], 2 * int64_t(i))) ++segments;
+        if (orourke.add_point(x[i], 2 * position(y, i))) ++segments;
     }
     return segments;
 }
@@ -73,16 +88,17 @@ inline size_t count_segments(ORourke<int64_t> &orourke, const std::vector<int64_
 // smallest k wins and the optimum sits at a step of L. A range [lo, hi] can be
 // discarded when lo * L(hi), the best product it could hold, cannot beat the
 // incumbent.
-inline std::vector<Row> analyse_prefix(ORourke<int64_t> &orourke, const std::vector<int64_t> &x) {
-    int64_t k_max = std::max<int64_t>(1, int64_t(x.size()) - 1);
+inline std::vector<Row> analyse_prefix(ORourke<int64_t> &orourke, const std::vector<int64_t> &x,
+                                       const std::vector<int64_t> *y = nullptr) {
+    int64_t k_max = full_k(x, y);
 
     std::vector<Row> rows;
     auto L = [&](int64_t k) -> size_t {
         for (const Row &r : rows) {
             if (r.k == k) return r.L;
         }
-        // At k >= k_max a horizontal line through the middle rank always fits.
-        size_t v = k >= k_max ? 1 : count_segments(orourke, x, k);
+        // At k >= k_max a horizontal line through the middle position always fits.
+        size_t v = k >= k_max ? 1 : count_segments(orourke, x, k, y);
         rows.push_back({k, v, false, false});
         return v;
     };
@@ -130,12 +146,13 @@ inline std::vector<Row> analyse_prefix(ORourke<int64_t> &orourke, const std::vec
 
 // The k minimising k * L(k) by trying every k, ties the --tiebreaker way, for
 // validation: (k, k * L).
-inline std::pair<int64_t, __int128> exhaustive_best(ORourke<int64_t> &orourke, const std::vector<int64_t> &x) {
-    int64_t k_max = std::max<int64_t>(1, int64_t(x.size()) - 1);
+inline std::pair<int64_t, __int128> exhaustive_best(ORourke<int64_t> &orourke, const std::vector<int64_t> &x,
+                                                   const std::vector<int64_t> *y = nullptr) {
+    int64_t k_max = full_k(x, y);
     __int128 best_product = -1;
     int64_t best_k = 1;
     for (int64_t k = 1; k <= k_max; ++k) {
-        __int128 product = __int128(k) * count_segments(orourke, x, k);
+        __int128 product = __int128(k) * count_segments(orourke, x, k, y);
         if (better(k, product, best_k, best_product)) {
             best_product = product;
             best_k = k;

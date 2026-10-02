@@ -1,7 +1,7 @@
-"""Which runs a plot script plots, shared by plot_exp1.py and plot_exp2.py.
+"""Which runs a plot script plots, shared by plot_exp2.py and tests/plot_pma.py.
 
-A run is results/<exp>/<run>/ holding <exp>_n<N>.csv files and meta.json; its
-figures go to figures/<exp>/<run>/. The modes:
+A run is results/<exp>/<run>/ holding CSVs (<exp>_n<N>.csv for the experiments)
+and meta.json; its figures go to figures/<exp>/<run>/. The modes:
   --new     (default) runs with no figures, or with CSVs newer than their oldest
             figure; skips runs that have not finished
   --latest  the highest-numbered run
@@ -50,7 +50,7 @@ def status_of(results):
     return meta_of(results).get("status")
 
 
-def needs_plot(results, figures, experiment):
+def needs_plot(results, figures):
     """True when the run has no figures, or a CSV newer than its oldest figure.
 
     Only the data counts: a change to the plot script is not seen, so after
@@ -60,7 +60,7 @@ def needs_plot(results, figures, experiment):
     if not pngs:
         return True
     oldest_figure = min(os.path.getmtime(p) for p in pngs)
-    return any(os.path.getmtime(p) > oldest_figure for p in csv_paths(results, experiment))
+    return any(os.path.getmtime(p) > oldest_figure for p in glob.glob(os.path.join(results, "*.csv")))
 
 
 def run_list(text):
@@ -87,13 +87,14 @@ def add_arguments(parser, experiment):
     which.add_argument("--only", type=run_list, metavar="RUNS", help="just these runs, e.g. --only=2,3")
 
 
-def chosen_runs(arguments, experiment):
+def chosen_runs(arguments, experiment, command=None):
     """The runs the arguments pick, as (run, results dir, figures dir); [] when
     there is nothing new to plot. Exits when there are no runs at all, or --only
-    names a missing one."""
+    names a missing one. command: what makes a run, for that message."""
     runs = all_runs(arguments.results)
     if not runs:
-        raise SystemExit(f"no runs in {arguments.results}/ - run experiments/{experiment}/{experiment} first")
+        command = command or f"experiments/{experiment}/{experiment}"
+        raise SystemExit(f"no runs in {arguments.results}/ - run {command} first")
 
     def places(run):
         return run, os.path.join(arguments.results, str(run)), os.path.join(arguments.figures, str(run))
@@ -114,11 +115,11 @@ def chosen_runs(arguments, experiment):
         _, results, figures = places(run)
         status = status_of(results)
         if status is not None and status != "complete":
-            if needs_plot(results, figures, experiment):
+            if needs_plot(results, figures):
                 print(f"run {run} is {status!r}, not complete - skipped; plot it with --only={run}",
                       file=sys.stderr)
             continue
-        if needs_plot(results, figures, experiment):
+        if needs_plot(results, figures):
             chosen.append(places(run))
     if not chosen:
         print("nothing new to plot - every finished run's figures are up to date "

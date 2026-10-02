@@ -14,10 +14,13 @@ One folder per n, n<N>/, against the prefix length t:
                          permutation
   segments.png           total lambda over the levels, each fixed delta and 2b
   best_delta.png         each build's own best delta, at the t it was built,
-                         coloured by level
+                         one panel per level
+  average_best_delta.png the average of those best deltas, per level, and exp1's
+                         best delta at t = 2^level (dotted) when it has a match
 
 and overall/, across n, each point a statistic over that n's prefixes:
-  query_complexity.png   2b: median, mean and max
+  query_complexity.png   2b: median, mean and max, and the same for exp1's
+                         static best (dashed) at the n that have a match
   overhead.png           2b minus exp1's static best: median, mean and max
                          (only when every n has a matching exp1 run)
 
@@ -46,6 +49,7 @@ TYPES = {"t": "int64", "level": "int64", "size": "int64", "k": "int64", "L": "in
 
 STATISTICS = ["median", "mean", "max"]
 STATISTIC_COLORS = {"median": "tab:blue", "mean": "tab:green", "max": "tab:red"}
+SERIES_COLOR = "#2a78d6"
 
 
 def level_cost(k, L):
@@ -105,8 +109,9 @@ def prefixes(frame, n):
 
 
 def static_best(exp1_results, meta, n):
-    """exp1's best cost per prefix t = 1..n, from an exp1 run with the same seed and
-    permutation that has this n; None when there is none."""
+    """exp1's best cost and best delta per prefix t = 1..n (index t - 1), as
+    (run, cost, delta), from an exp1 run with the same seed and permutation that
+    has this n; None when there is none."""
     if not meta:
         return None
     for run in reversed(runs.all_runs(exp1_results)):
@@ -123,7 +128,7 @@ def static_best(exp1_results, meta, n):
         best = frame[frame["best"] == 1].sort_values("t")
         if len(best) != n:
             continue  # cut short
-        return run, level_cost(best["k"].to_numpy(), best["L"].to_numpy())
+        return run, level_cost(best["k"].to_numpy(), best["L"].to_numpy()), best["k"].to_numpy() / 2
     return None
 
 
@@ -138,7 +143,7 @@ def plot_n(frame, table, static, n, figures):
         axis.plot(table["t"], table[f"cost_k{k}"], lw=1, label=delta_label(k))
     axis.plot(table["t"], table["cost_best"], lw=1.5, ls="--", color="black", label="own δ per level")
     if static is not None:
-        run, cost = static
+        run, cost, _ = static
         axis.plot(table["t"], cost, lw=1, ls=":", color="dimgray", label=f"static best (exp1 run {run})")
     axis.set_title(f"Query complexity, Bentley-Saxe, n = {n}")
     axis.set_xlabel("prefix length t")
@@ -160,21 +165,49 @@ def plot_n(frame, table, static, n, figures):
     axis.grid(alpha=0.3)
     paths.append(save(fig, folder, "segments.png"))
 
+    # One panel per level: too many levels to tell apart by colour on one axis.
     best = frame[frame["best"] == 1]
-    fig, axis = plt.subplots(figsize=(9, 5))
     levels = sorted(best["level"].unique())
-    colors = plt.cm.viridis(np.linspace(0, 1, len(levels)))
-    for level, color in zip(levels, colors):
-        rows = best[best["level"] == level]
-        axis.scatter(rows["t"], rows["k"] / 2, s=6 if level < 4 else 14, color=color,
-                     label=f"level {level} ({1 << level:,} keys)")
-    axis.set_yscale("log", base=2)
-    axis.set_title(f"Each level's own best δ, when it is built, n = {n}")
-    axis.set_xlabel("prefix length t at the build")
-    axis.set_ylabel("best δ of the level built")
-    axis.legend(ncol=2, fontsize=7, markerscale=2)
-    axis.grid(alpha=0.3)
+    columns = 4
+    grid_rows = -(-len(levels) // columns)
+    fig, axes = plt.subplots(grid_rows, columns, figsize=(12, 2.2 * grid_rows + 0.6),
+                             sharex=True, sharey=True, squeeze=False)
+    for axis, level in zip(axes.flat, levels):
+        rows = best[best["level"] == level].sort_values("t")
+        axis.plot(rows["t"], rows["k"] / 2, lw=1, marker="o", ms=2 if len(rows) > 64 else 4,
+                  color=SERIES_COLOR)
+        axis.set_title(f"level {level} ({1 << level:,} keys)", fontsize=9)
+        axis.set_yscale("log", base=2)
+        axis.grid(alpha=0.3)
+    for axis in axes.flat[len(levels):]:
+        axis.set_visible(False)
+    for axis in axes[:, 0]:
+        axis.set_ylabel("best δ")
+    for axis in axes.flat[max(0, len(levels) - columns):len(levels)]:
+        axis.xaxis.set_tick_params(labelbottom=True)
+        axis.set_xlabel("prefix length t at the build")
+    fig.suptitle(f"Each level's own best δ, when it is built, n = {n}")
     paths.append(save(fig, folder, "best_delta.png"))
+
+    fig, axis = plt.subplots(figsize=(9, 5))
+    average = (best["k"] / 2).groupby(best["level"]).mean()
+    axis.plot(average.index, average.to_numpy(), lw=1.5, marker="o", ms=5, color=SERIES_COLOR,
+              label="Bentley-Saxe: average over the level's builds")
+    if static is not None:
+        # Level i holds 2^i keys: compare with exp1's static index on the prefix of that size.
+        run, _, delta = static
+        levels = [level for level in average.index if 1 << level <= n]
+        axis.plot(levels, [delta[(1 << level) - 1] for level in levels], lw=1.5, ls=":", marker="s",
+                  ms=5, color="dimgray", label=f"static best at t = 2^level (exp1 run {run})")
+        axis.legend()
+    axis.set_yscale("log", base=2)
+    axis.set_xticks(average.index)
+    axis.set_xticklabels([f"{level}\n({1 << level:,})" for level in average.index], fontsize=7)
+    axis.set_title(f"Average best δ over a level's builds, n = {n}")
+    axis.set_xlabel("level (keys)")
+    axis.set_ylabel("average best δ")
+    axis.grid(alpha=0.3)
+    paths.append(save(fig, folder, "average_best_delta.png"))
     return paths
 
 
@@ -195,11 +228,17 @@ def plot_overall(summary, figures):
     sizes = sorted(summary)
     paths = []
 
-    def by_statistic(key, title, ylabel, name):
+    def by_statistic(key, title, ylabel, name, compare=None):
         fig, axis = plt.subplots(figsize=(9, 5))
         for stat in STATISTICS:
             axis.plot(sizes, [summary[n][key][stat] for n in sizes], lw=1.5, marker="o", ms=4,
                       color=STATISTIC_COLORS[stat], label=stat if stat != "mean" else "average")
+        # The same statistics of exp1's static best, dashed, at the n that have a match.
+        matched = [n for n in sizes if compare in summary[n]]
+        for stat in STATISTICS if matched else []:
+            axis.plot(matched, [summary[n][compare][stat] for n in matched], lw=1.5, ls="--",
+                      marker="s", ms=4, color=STATISTIC_COLORS[stat],
+                      label=f"{stat if stat != 'mean' else 'average'}, static best (exp1)")
         axis.set_title(title)
         axis.set_ylabel(ylabel)
         n_axis(axis, sizes)
@@ -207,7 +246,8 @@ def plot_overall(summary, figures):
         paths.append(save(fig, folder, name))
 
     by_statistic("cost_best", "Summary query complexity over prefixes, own δ per level, by n",
-                 "query complexity\nΣ over levels log2(λ) + log2(δ)", "query_complexity.png")
+                 "query complexity\nΣ over levels log2(λ) + log2(δ)", "query_complexity.png",
+                 compare="static")
     if all("overhead" in summary[n] for n in sizes):
         by_statistic("overhead", "Summary overhead over the static index, by n",
                      "Bentley-Saxe (own δ) minus static best\nquery complexity", "overhead.png")
@@ -236,6 +276,7 @@ def plot_run(run, results, figures, exp1_results):
 
         summary[n] = {"cost_best": table["cost_best"].agg(STATISTICS)}
         if static is not None:
+            summary[n]["static"] = pd.Series(static[1]).agg(STATISTICS)
             summary[n]["overhead"] = (table["cost_best"] - static[1]).agg(STATISTICS)
 
     if summary:
