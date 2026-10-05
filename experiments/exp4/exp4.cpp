@@ -17,6 +17,9 @@
 #include <string>
 #include <vector>
 
+#include "../../src/Hull/scan_hull.hpp"
+#include "../../src/Hull/tree_hull.hpp"
+#include "../../src/Hull/vector_hull.hpp"
 #include "../../src/LPMA/learned_pma.hpp"
 #include "../../src/ORourke/pgm_orourke.hpp"
 #include "../../src/PMA/pma.hpp"
@@ -49,7 +52,7 @@ inline void omp_set_num_threads(int) {}
 // O'Rourke on the same points is the comparison, and lambda is at most twice
 // its optimum - 1, at the same delta.
 //
-// --hull picks what each segment keeps to test joins (src/LPMA/hull.hpp). The
+// --hull picks what each segment keeps to test joins (src/Hull). The
 // segments are the same either way; only the time differs.
 
 const char *DEFAULT_NS = "128,256,512,1024,2048,4096,8192,16384,32768,65536";
@@ -142,7 +145,8 @@ DeltaRun run_delta(const std::vector<int64_t> &permutation, int64_t k, Progress 
 
 // Every delta on one permutation of {1..n}, the deltas in parallel, the largest
 // first: they keep the largest segments, so they take the longest.
-std::vector<DeltaRun> run_n(size_t n, uint64_t seed, const std::vector<int64_t> &ks, bool scan, Progress &progress) {
+std::vector<DeltaRun> run_n(size_t n, uint64_t seed, const std::vector<int64_t> &ks, const std::string &hull,
+                            Progress &progress) {
     std::vector<int64_t> permutation = make_permutation(n, seed);
     std::vector<DeltaRun> runs(ks.size());
     std::vector<size_t> order(ks.size());
@@ -152,14 +156,16 @@ std::vector<DeltaRun> run_n(size_t n, uint64_t seed, const std::vector<int64_t> 
     #pragma omp parallel for schedule(dynamic, 1)
     for (size_t j = 0; j < order.size(); ++j) {
         size_t d = order[j];
-        runs[d] = scan ? run_delta<lpma::ScanHull>(permutation, ks[d], progress)
-                       : run_delta<lpma::VectorHull>(permutation, ks[d], progress);
+        if (hull == "scan") runs[d] = run_delta<lpma::ScanHull>(permutation, ks[d], progress);
+        else if (hull == "tree") runs[d] = run_delta<lpma::TreeHull>(permutation, ks[d], progress);
+        else runs[d] = run_delta<lpma::VectorHull>(permutation, ks[d], progress);
     }
     return runs;
 }
 
-// At every prefix and delta: both hulls' indexes pass check() (their segments,
-// lines, no two neighbours joinable) and agree; their PMA holds exp3's layout;
+// At every prefix and delta: the three hulls' indexes pass check() (their
+// segments, lines, no two neighbours joinable, T2's trees) and agree; their PMA
+// holds exp3's layout;
 // lambda <= 2 * optimum - 1, the optimum counted as exp3 counts it (PGM's
 // O'Rourke); and lower_bound is right for every key 0..n+1. Small n only.
 bool validate(size_t n, uint64_t seed, const std::vector<int64_t> &ks) {
@@ -168,6 +174,7 @@ bool validate(size_t n, uint64_t seed, const std::vector<int64_t> &ks) {
     for (int64_t k : ks) {
         lpma::LearnedPMA<lpma::ScanHull> scan(k);
         lpma::LearnedPMA<lpma::VectorHull> vector(k);
+        lpma::LearnedPMA<lpma::TreeHull> tree(k);
         PMA<> plain;
         std::set<int64_t> inserted;
         std::vector<int64_t> keys, slots, other_keys, other_slots;
@@ -179,25 +186,30 @@ bool validate(size_t n, uint64_t seed, const std::vector<int64_t> &ks) {
             };
             scan.insert(permutation[i]);
             vector.insert(permutation[i]);
+            tree.insert(permutation[i]);
             plain.insert(permutation[i]);
             inserted.insert(permutation[i]);
 
             plain.points(keys, slots);
             for (const PackedMemoryArray *pma : {static_cast<const PackedMemoryArray *>(&scan.pma()),
-                                                 static_cast<const PackedMemoryArray *>(&vector.pma())}) {
+                                                 static_cast<const PackedMemoryArray *>(&vector.pma()),
+                                                 static_cast<const PackedMemoryArray *>(&tree.pma())}) {
                 pma->points(other_keys, other_slots);
                 if (other_keys != keys || other_slots != slots) return fail("LAYOUT DIFFERS FROM exp3's PMA");
             }
             if (const char *problem = scan.problem()) return fail(std::string("ScanHull: ") + problem);
             if (const char *problem = vector.problem()) return fail(std::string("VectorHull: ") + problem);
-            if (scan.segment_count() != vector.segment_count()) return fail("THE HULLS GIVE DIFFERENT SEGMENTS");
+            if (const char *problem = tree.problem()) return fail(std::string("TreeHull: ") + problem);
+            if (scan.segment_count() != vector.segment_count() || scan.segment_count() != tree.segment_count())
+                return fail("THE HULLS GIVE DIFFERENT SEGMENTS");
             size_t optimal = count_segments(pgm, keys, k, &slots);
             if (scan.segment_count() > 2 * optimal - 1) return fail("MORE THAN 2 * OPTIMAL - 1 SEGMENTS");
             for (int64_t q = 0; q <= int64_t(n) + 1; ++q) {
                 auto it = inserted.lower_bound(q);
                 std::optional<int64_t> expected;
                 if (it != inserted.end()) expected = *it;
-                if (scan.lower_bound(q) != expected || vector.lower_bound(q) != expected)
+                if (scan.lower_bound(q) != expected || vector.lower_bound(q) != expected ||
+                    tree.lower_bound(q) != expected)
                     return fail("LOWER_BOUND(" + std::to_string(q) + ") WRONG");
             }
         }
@@ -215,8 +227,8 @@ void usage(const char *program) {
               << "  --out DIR     directory holding the runs (default " << DEFAULT_OUT << "); the CSVs go to\n"
               << "                DIR/<run>, run = 1, 2, ... the next unused number\n"
               << "  --deltas D,D,...  the deltas, multiples of 0.5 (default " << DEFAULT_DELTAS << ")\n"
-              << "  --hull H      what each segment keeps to test joins: vector (default) or scan;\n"
-              << "                the same segments either way, only the time differs\n"
+              << "  --hull H      what each segment keeps to test joins: scan (T0), vector (T1, the\n"
+              << "                default) or tree (T2); the same segments with each, only the time differs\n"
               << "  --validate    check the index at every prefix against exp3's PMA and O'Rourke;\n"
               << "                writes no files\n"
               << "  --permutation P  the insertion order of 1..n, as exp1 (default uniform):\n"
@@ -332,8 +344,8 @@ int main(int argc, char **argv) {
             deltas_argument = argv[++i];
         } else if (argument == "--hull") {
             hull = argv[++i];
-            if (hull != "vector" && hull != "scan") {
-                std::cerr << "unknown hull: " << hull << " (vector or scan)\n";
+            if (hull != "vector" && hull != "scan" && hull != "tree") {
+                std::cerr << "unknown hull: " << hull << " (scan, vector or tree)\n";
                 usage(argv[0]);
             }
         } else if (argument == "--validate") {
@@ -394,7 +406,7 @@ int main(int argc, char **argv) {
         json += inserts.empty() ? "}" : "\n  }";
         meta.extra = {{"structure", json_string(structure)},
                       {"pma", pma_json()},
-                      {"hull", json_string(hull == "scan" ? "ScanHull" : "VectorHull")},
+                      {"hull", json_string(hull == "scan" ? "ScanHull" : hull == "tree" ? "TreeHull" : "VectorHull")},
                       {"inserts", json}};
     };
     set_extra();
@@ -422,7 +434,7 @@ int main(int argc, char **argv) {
         progress.total = uint64_t(n) * ks.size();
         progress.done = 0;
         auto started = std::chrono::steady_clock::now();
-        std::vector<DeltaRun> runs = run_n(n, n_seed, ks, hull == "scan", progress);
+        std::vector<DeltaRun> runs = run_n(n, n_seed, ks, hull, progress);
         double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         progress.draw(n);
         std::fprintf(stderr, "\n");

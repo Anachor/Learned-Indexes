@@ -210,7 +210,8 @@ function renderRunMeta(run) {
   if (meta.hull) {
     row("hull", code(meta.hull),
         aside(meta.hull === "ScanHull" ? "a join reads every point of both segments"
-                                       : "a join reads only the segments' hull vertices"));
+              : meta.hull === "TreeHull" ? "a tree of hulls: joins and splits in polylog time"
+              : "a join reads only the segments' hull vertices"));
   }
   if (Array.isArray(meta.fixed_deltas) && meta.fixed_deltas.length) {
     row("fixed δ", meta.fixed_deltas.join(", "));

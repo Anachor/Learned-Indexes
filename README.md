@@ -7,9 +7,11 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 - `notes/`: paper draft, experiment plan (`Notes.txt`), progress log (`workflow.md`)
 - `src/ORourke/`: O'Rourke interface (`orourke.hpp`) and implementations: PGM, ZLW, brute force
 - `src/PMA/`: the packed memory array (`pma.hpp`, C++20)
-- `src/LPMA/`: the learned PMA (`learned_pma.hpp`, C++20): segments of keys in a PMA, each with a line within delta of their slots,
-  kept so that no two neighbours can be joined (at most 2 * optimal - 1 segments). `geometry.hpp` is the exact O'Rourke,
-  `hull.hpp` what a segment keeps to test joins (`ScanHull`: nothing; `VectorHull`: its hull chains), `segment.hpp` a segment
+- `src/LPMA/`: the learned PMA (`learned_pma.hpp`, C++20): segments of keys in a PMA, each with a line within delta of
+  their slots, no two neighbours joinable (so at most 2 * optimal - 1 segments); `segment.hpp` is one segment
+- `src/Hull/`: what a segment keeps to test joins (`hull.hpp`): T0 `ScanHull` keeps nothing, T1 `VectorHull` its hull as
+  vectors, T2 `TreeHull` a tree of hulls (polylog joins and splits; searches in `chains.hpp`). `geometry.hpp` is the
+  exact geometry and O'Rourke
 - `tests/`: stress tests and speed comparison of the implementations
 - `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`;
   `experiments/common/` holds what they share (permutations, the best-delta search, run folders and `meta.json`)
@@ -47,13 +49,18 @@ git submodule update --init
     python3 tests/plot_pma.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
     ```
 
-- **Learned PMA** (`src/LPMA/`, C++20): checks the exact O'Rourke against the brute force, segment joins and splits
-  against brute force and building from scratch, and `LearnedPMA<ScanHull>` and `LearnedPMA<VectorHull>` side by side
-  on random insert sequences over three PMAs: after every insert the segments, their lines, no joinable neighbours,
-  at most 2 * optimal - 1 segments, and `lower_bound`/`contains` against a `std::set`. Writes nothing.
+- **Learned PMA** (`src/LPMA/`, `src/Hull/`, C++20), writing nothing, each `[-i iterations] [-n MAXN] [seed]`:
+  `tests/fitter` checks the exact O'Rourke against brute force; `tests/hulls` that T0, T1 and T2 build the same
+  segments, lines and hulls, joins against brute force and splits against building from scratch; `tests/lpma` the
+  index with all three hulls side by side on random inserts over three PMAs - after every insert its checks, the same
+  structure from all three, and `lower_bound`/`contains` against a `std::set`. `tests/lpma_speed` times inserts and
+  lookups with each hull (the median of `-r` repeats).
     ```
-    g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma
-    ./tests/lpma [-i iterations] [-n MAXN] [seed]
+    g++-11 -std=c++20 -O2 tests/fitter.cpp -o tests/fitter && ./tests/fitter
+    g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls && ./tests/hulls
+    g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma && ./tests/lpma
+    g++-11 -std=c++20 -O2 tests/lpma_speed.cpp -o tests/lpma_speed
+    ./tests/lpma_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree] [-q Q] [-r R] [--csv FILE]
     ```
 
 ## Experiment 1
@@ -237,16 +244,18 @@ or `vector` (default) only changes the time.
     ./experiments/exp4/exp4 [-n N,N,...] [-j THREADS] [--out DIR] [--deltas D,D,...] [--hull H] [--permutation P] [--tiebreaker T] [seed]
     ```
 
-- **Plot**: per n, `query_complexity.png` (each delta, the grid's best, and exp3's
-  static best over the grid and over every delta), `segments.png`, `optimality.png`
-  (lambda over exp3's optimum at the same delta) and `best_delta.png`; across n,
-  `overall/query_complexity.png`, `delta_qc.png` (each delta's average),
-  `optimality.png`, `best_delta.png`, `overhead.png` and `insert_time.png`. The
-  comparisons need an exp3 run in `--exp3-results` with the same seed, permutation
-  and PMA. Same run modes as exp1.
+- **Plot**: per n, `query_complexity.png` (each delta, the grid's best, exp3's static
+  best over the grid and over every delta, and exp1's static best), `segments.png`,
+  `optimality.png` (lambda over exp3's optimum at the same delta) and `best_delta.png`;
+  across n, `overall/query_complexity.png`, `delta_qc.png` (each delta's average),
+  `optimality.png`, `best_delta.png`, `overhead.png` (over exp3: what being dynamic
+  costs), `overhead_exp1.png` (over the sorted array, with the PMA's part) and
+  `insert_time.png`. The comparisons come from the runs in `--exp3-results` (same seed,
+  permutation and PMA) and `--exp1-results` (same seed and permutation), the same
+  tiebreaker preferred. Same run modes as exp1.
 
     ```
-    python3 experiments/exp4/plot_exp4.py [--new | --latest | --all | --only=RUNS] [--exp3-results DIR]
+    python3 experiments/exp4/plot_exp4.py [--new | --latest | --all | --only=RUNS] [--exp3-results DIR] [--exp1-results DIR]
     ```
 
 - **Validate** (small n, writes nothing): at every prefix and delta, both hulls' indexes

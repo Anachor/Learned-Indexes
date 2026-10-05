@@ -1,36 +1,19 @@
 #pragma once
 
-// A learned index on a PMA: the keys sit in a PMA (src/PMA), gaps and all, and
-// segments of consecutive keys (segment.hpp) each carry a line within delta of
-// their keys' slots, so a query evaluates one line and searches about 2*delta
-// slots. Insert only, keys distinct.
+// A learned index on a PMA: the keys live in the PMA, and segments of
+// consecutive keys each carry a line within delta of their slots, so a lookup
+// evaluates one line and searches about 2*delta slots. Insert only.
 //
-// The points are (key, 2*slot) with integer bound k = 2*delta, as in the
-// experiments. H (hull.hpp) is what each segment keeps to test joins.
-//
-// insert(x):
-//   1. insert x into the PMA, which reports the slots it rewrote;
-//   2. if it grew, segment the whole array again (greedy O'Rourke);
-//   3. otherwise the segments whose keys overlap the reported keys keep their
-//      points outside the reported slots, L before them and R after (those
-//      points did not move, so the lines still fit), and the reported slots
-//      are segmented again: T1..Tt;
-//   4. one pass over A, L, T1..Tt, R, B, where A and B are the neighbouring
-//      segments, joins each pair that one line fits. It skips Ti, Ti+1, which
-//      greedy already found apart, so it makes at most 4 attempts.
-//
-// After every insert no two neighbouring segments can be joined. The union
-// of two neighbours then contains a boundary of an optimal segmentation (the
-// fewest segments for the same points and k), and a boundary lies in at most
-// two such unions, so there are at most 2 * optimal - 1 segments.
-//
-// lower_bound(x): the segment whose keys surround x, then its line at x: the
-// slot of x's successor in it is within [ceil((line - k) / 2),
-// floor((line + k) / 2)], even when x is absent, as the line at x lies
-// between its values at x's neighbours.
+// After an insert, the segments the PMA moved are rebuilt with O'Rourke, the
+// ones it cut keep their unmoved parts, and neighbours are joined where one line
+// fits. No two neighbours can then be joined, which leaves at most 2 * optimal - 1
+// segments. H (src/Hull) is what a segment keeps to test joins. Less orders
+// the keys of the segment map and of a lookup's search (tests count with it);
+// the PMA's own search does not use it.
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -44,18 +27,19 @@
 
 namespace lpma {
 
-template <Hull H, class Storage = PMA<>>
+template <Hull H, class Storage = PMA<>, class Less = std::less<Key>>
 class LearnedPMA {
 public:
     using Seg = Segment<H>;
 
     struct Stats {
-        uint64_t inserts = 0, grows = 0;                     // successful inserts; those that grew the PMA
+        uint64_t inserts = 0, grows = 0;
         uint64_t rebuilt_points = 0, rebuilt_segments = 0;  // segmented again by O'Rourke
         uint64_t splits = 0, join_attempts = 0, joins = 0;
         bool operator==(const Stats &) const = default;
     };
 
+    // k = 2 * delta: the points are (key, 2 * slot).
     explicit LearnedPMA(int64_t k) : k_(k), fitter_(k) {
         if (k < 0 || k > MAX_K) throw std::invalid_argument("LearnedPMA: k must be in [0, 2^58]");
     }
@@ -63,7 +47,7 @@ public:
     // Inserts x; false if it is already there.
     bool insert(Key x);
 
-    // The slot of the smallest key >= x, if there is one.
+    // The slot of the smallest key >= x.
     std::optional<size_t> lower_bound_slot(Key x) const;
 
     std::optional<Key> lower_bound(Key x) const {
@@ -78,59 +62,63 @@ public:
     size_t segment_count() const { return segments_.size(); }
     int64_t k() const { return k_; }
     const Storage &pma() const { return pma_; }
-    const std::map<Key, Seg> &segments() const { return segments_; }  // by first key
+    const std::map<Key, Seg, Less> &segments() const { return segments_; }  // by first key
     const Stats &stats() const { return stats_; }
 
-    // What is wrong, or nullptr: the PMA's invariants; the segments are valid
-    // and cover the keys in order; no two neighbours can be joined; at most
-    // 2 * optimal - 1 segments. O(capacity); for validation.
+    // What is wrong, or nullptr: checks the PMA, every segment, that no two
+    // neighbours can be joined, and at most 2 * optimal - 1 segments. For tests.
     const char *problem() const;
-    bool check() const { return problem() == nullptr; }
 
 private:
     Storage pma_;
-    std::map<Key, Seg> segments_;
+    std::map<Key, Seg, Less> segments_;
     int64_t k_;
     Fitter fitter_;
     Stats stats_;
 
     PointView view() const { return {pma_}; }
-
-    // Greedy O'Rourke over the points in slots r: maximal runs, in order.
     std::vector<Seg> segment(SlotRange r);
+    void repair(const PackedMemoryArray::Update &update);
+    std::vector<Seg> join_neighbours(std::vector<Seg> &pieces, const std::vector<bool> &rebuilt);
 };
 
-template <Hull H, class Storage>
-bool LearnedPMA<H, Storage>::insert(Key x) {
+template <Hull H, class Storage, class Less>
+bool LearnedPMA<H, Storage, Less>::insert(Key x) {
     PackedMemoryArray::Update update;
     if (!pma_.insert(x, &update)) return false;
     if (pma_.capacity() > MAX_CAPACITY) throw std::length_error("LearnedPMA: capacity above 2^57");
     ++stats_.inserts;
-
     if (update.grew()) {
         ++stats_.grows;
         segments_.clear();
         for (Seg &s : segment({0, pma_.capacity()})) segments_.emplace_hint(segments_.end(), s.first, std::move(s));
-        return true;
+    } else {
+        repair(update);
     }
-    if (update.old_slots != update.new_slots)
-        throw std::logic_error("LearnedPMA: an insert without growth must report the same old and new slots");
+    return true;
+}
+
+// Replaces the segments around the slots an insert rewrote.
+template <Hull H, class Storage, class Less>
+void LearnedPMA<H, Storage, Less>::repair(const PackedMemoryArray::Update &update) {
+    if (update.old_slots != update.new_slots) throw std::logic_error("LearnedPMA: old and new slots differ");
     PointView pts = view();
     auto [first, last] = *update.affected_keys;
+    Less less = segments_.key_comp();
 
-    // The segments whose keys overlap first..last: [lo, hi). Then one more on
-    // each side, A and B: [begin, end).
+    // [lo, hi): the segments with keys in first..last. [begin, end): also one
+    // neighbour on each side, A and B.
     auto lo = segments_.upper_bound(first);
-    if (lo != segments_.begin() && std::prev(lo)->second.last >= first) --lo;
+    if (lo != segments_.begin() && !less(std::prev(lo)->second.last, first)) --lo;
     auto hi = segments_.upper_bound(last);
     auto begin = lo == segments_.begin() ? lo : std::prev(lo);
     auto end = hi == segments_.end() ? hi : std::next(hi);
 
-    // L and R: what the overlapping segments keep outside the rewritten slots.
+    // L and R: the parts of those segments outside the rewritten slots.
     std::optional<Seg> left, right;
     if (lo != hi) {
         auto back = std::prev(hi);
-        bool cut_front = lo->second.first < first, cut_back = back->second.last > last;
+        bool cut_front = less(lo->second.first, first), cut_back = less(last, back->second.last);
         if (lo == back && (cut_front || cut_back)) {
             std::tie(left, right) = Seg::split(std::move(lo->second), update.old_slots, pts);
             ++stats_.splits;
@@ -146,7 +134,7 @@ bool LearnedPMA<H, Storage>::insert(Key x) {
         }
     }
 
-    // A, L, T1..Tt, R, B, and which of them are rebuilt (the Ti).
+    // A, L, the rewritten slots segmented again, R, B.
     std::vector<Seg> pieces;
     std::vector<bool> rebuilt;
     auto add = [&](Seg &&s, bool fresh) {
@@ -159,14 +147,22 @@ bool LearnedPMA<H, Storage>::insert(Key x) {
     if (right) add(std::move(*right), false);
     if (hi != end) add(std::move(hi->second), false);
 
-    // Join each piece onto the one before when one line fits. A failed pair
-    // stays apart: later joins only add points to its right side. Two rebuilt
-    // pieces are not tried, as greedy made the first one maximal.
+    std::vector<Seg> joined = join_neighbours(pieces, rebuilt);
+    segments_.erase(begin, end);
+    for (Seg &s : joined) segments_.emplace_hint(end, s.first, std::move(s));
+}
+
+// Joins each piece onto the one before when one line fits. Two rebuilt pieces
+// are not tried: greedy made the first one maximal. A pair that fails stays
+// apart, as later joins only add to its right side. At most 4 attempts.
+template <Hull H, class Storage, class Less>
+std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::join_neighbours(std::vector<Seg> &pieces,
+                                                                       const std::vector<bool> &rebuilt) {
     std::vector<Seg> joined;
     for (size_t i = 0; i < pieces.size(); ++i) {
         if (i > 0 && !(rebuilt[i - 1] && rebuilt[i])) {
             ++stats_.join_attempts;
-            if (auto j = Seg::try_join(joined.back(), pieces[i], pts, k_)) {
+            if (auto j = Seg::try_join(joined.back(), pieces[i], view(), k_)) {
                 ++stats_.joins;
                 joined.back() = std::move(*j);
                 continue;
@@ -174,14 +170,12 @@ bool LearnedPMA<H, Storage>::insert(Key x) {
         }
         joined.push_back(std::move(pieces[i]));
     }
-
-    segments_.erase(begin, end);
-    for (Seg &s : joined) segments_.emplace_hint(end, s.first, std::move(s));
-    return true;
+    return joined;
 }
 
-template <Hull H, class Storage>
-std::vector<Segment<H>> LearnedPMA<H, Storage>::segment(SlotRange r) {
+// Greedy O'Rourke over the points in slots r.
+template <Hull H, class Storage, class Less>
+std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::segment(SlotRange r) {
     PointView pts = view();
     std::vector<Seg> out;
     size_t begin = NONE, last = NONE;
@@ -204,31 +198,28 @@ std::vector<Segment<H>> LearnedPMA<H, Storage>::segment(SlotRange r) {
     return out;
 }
 
-template <Hull H, class Storage>
-std::optional<size_t> LearnedPMA<H, Storage>::lower_bound_slot(Key x) const {
+// The segment around x, then its line: x's successor is at a slot in
+// [ceil((line(x) - k) / 2), floor((line(x) + k) / 2)], even when x is absent.
+template <Hull H, class Storage, class Less>
+std::optional<size_t> LearnedPMA<H, Storage, Less>::lower_bound_slot(Key x) const {
     if (segments_.empty()) return std::nullopt;
     auto next = segments_.upper_bound(x);
     if (next == segments_.begin()) return next->second.slots.begin;  // below every key
     const Seg &s = std::prev(next)->second;
-    if (x > s.last) {  // between two segments, or above every key
+    Less less = segments_.key_comp();
+    if (less(s.last, x)) {  // between two segments, or above every key
         if (next == segments_.end()) return std::nullopt;
         return next->second.slots.begin;
     }
 
-    // s.first <= x <= s.last: x's successor is in s, its slot >= lo, and every
-    // key of s below x sits at a slot <= hi.
     auto [lo_slot, hi_slot] = s.line.slot_window(x, k_);
     auto clamp = [](i128 v, size_t a, size_t b) { return v < i128(a) ? a : v > i128(b) ? b : size_t(v); };
-    size_t lo = clamp(lo_slot, s.slots.begin, s.slots.end);
-    size_t hi = clamp(hi_slot + 1, lo, s.slots.end);
-
-    // Binary search over [lo, hi), gaps and all: the occupied slots in [lo, a)
-    // hold keys < x, those in [b, hi) keys >= x.
-    size_t a = lo, b = hi;
+    size_t a = clamp(lo_slot, s.slots.begin, s.slots.end), b = clamp(hi_slot + 1, a, s.slots.end);
+    // Binary search, gaps and all: occupied slots before a hold keys < x, from b on keys >= x.
     while (a < b) {
         size_t mid = a + (b - a) / 2, t = mid;
         while (t > a && !pma_.occupied(t)) --t;
-        if (!pma_.occupied(t) || pma_.key_at(t) < x) a = mid + 1;
+        if (!pma_.occupied(t) || less(pma_.key_at(t), x)) a = mid + 1;
         else b = t;
     }
     size_t slot = view().next_occupied(a, s.slots.end);
@@ -236,8 +227,8 @@ std::optional<size_t> LearnedPMA<H, Storage>::lower_bound_slot(Key x) const {
     return slot;
 }
 
-template <Hull H, class Storage>
-const char *LearnedPMA<H, Storage>::problem() const {
+template <Hull H, class Storage, class Less>
+const char *LearnedPMA<H, Storage, Less>::problem() const {
     if (!pma_.check()) return "PMA invariants";
     PointView pts = view();
     size_t covered = 0, next = 0;

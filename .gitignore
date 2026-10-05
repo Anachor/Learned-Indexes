@@ -12,4 +12,7 @@ experiments/exp4/exp4
 tests/pma
 tests/pma_resized
 tests/lpma
+tests/fitter
+tests/hulls
+tests/lpma_speed
 
