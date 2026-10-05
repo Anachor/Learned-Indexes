@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plots for experiment 4, from the CSVs written by exp4.
 
-exp4 inserts the keys into the learned PMA (src/LPMA), once for each delta of a
+exp4 inserts the keys into the GPLA (src/GPLA), once for each delta of a
 grid, and records its number of segments lambda after every insert. Each CSV
 row is one delta at one prefix t, with the PMA's capacity after that insert.
 
@@ -191,7 +191,7 @@ def plot_n(frame, exp3, exp1, n, figures):
         axis.plot(exp3[1]["t"], exp3[1]["cost"], lw=1, ls=":", color=EXP3_COLOR, label=exp3_label)
     if exp1:
         axis.plot(exp1[1]["t"], exp1[1]["cost"], lw=1, ls=":", color=EXP1_COLOR, label=exp1_label)
-    axis.set_title(f"Query complexity of the learned PMA, n = {n}")
+    axis.set_title(f"Query complexity of the GPLA, n = {n}")
     axis.set_xlabel("prefix length t")
     axis.set_ylabel("query complexity\nlog2(λ) + log2(δ), δ in slots")
     axis.legend(ncol=3, fontsize="small")
@@ -203,7 +203,7 @@ def plot_n(frame, exp3, exp1, n, figures):
         axis.plot(rows["t"], rows["L"], lw=1, color=colors[k], label=delta_label(k))
     axis.plot(best["t"], best["L"], lw=1.5, ls="--", color="black", label="best δ")
     axis.set_yscale("log")
-    axis.set_title(f"Number of segments of the learned PMA, n = {n}")
+    axis.set_title(f"Number of segments of the GPLA, n = {n}")
     axis.set_xlabel("prefix length t")
     axis.set_ylabel("number of segments λ")
     axis.legend(ncol=3, fontsize="small")
@@ -226,8 +226,8 @@ def plot_n(frame, exp3, exp1, n, figures):
     # Stacked panels, not a second y-axis: δ and λ have unrelated scales.
     fig, (top, middle, bottom) = plt.subplots(3, 1, figsize=(9, 8), sharex=True,
                                               gridspec_kw={"height_ratios": [2, 2, 1]})
-    top.step(best["t"], best["k"] / 2, where="post", lw=1, color=SERIES_COLOR, label="learned PMA, best of the grid")
-    middle.plot(best["t"], best["L"], lw=1, color=SERIES_COLOR, label="learned PMA, best of the grid")
+    top.step(best["t"], best["k"] / 2, where="post", lw=1, color=SERIES_COLOR, label="GPLA, best of the grid")
+    middle.plot(best["t"], best["L"], lw=1, color=SERIES_COLOR, label="GPLA, best of the grid")
     for match, color, label in ((exp3, EXP3_COLOR, exp3_label), (exp1, EXP1_COLOR, exp1_label)):
         if match:
             top.plot(match[1]["t"], match[1]["delta"], lw=1, ls=":", color=color, label=label)
@@ -319,7 +319,7 @@ def plot_overall(summary, meta, figures):
             axis.plot(present, [summary[n][key][k] for n in present], lw=1.2, marker="o", ms=3,
                       color=colors[k], label=delta_label(k), **style)
 
-    by_statistic("cost", "Summary query complexity over prefixes, learned PMA, by n",
+    by_statistic("cost", "Summary query complexity over prefixes, GPLA, by n",
                  "query complexity at the grid's best δ\nlog2(λ) + log2(δ)", "query_complexity.png",
                  compares=[("exp3", "static best, same PMA (exp3)", "--", "s"),
                            ("exp1", "static best, sorted array (exp1)", ":", "^")])
@@ -328,7 +328,7 @@ def plot_overall(summary, meta, figures):
     by_delta("delta_cost", sizes, axis)
     axis.plot(sizes, [summary[n]["cost"]["mean"] for n in sizes], lw=1.5, ls="--", color="black",
               label="best δ at each prefix")
-    axis.set_title("Average query complexity over prefixes for each δ, learned PMA, by n")
+    axis.set_title("Average query complexity over prefixes for each δ, GPLA, by n")
     axis.set_ylabel("average query complexity\nlog2(λ) + log2(δ)")
     n_axis(axis, sizes)
     axis.legend(ncol=3, fontsize="small")
@@ -349,16 +349,16 @@ def plot_overall(summary, meta, figures):
         top.legend(ncol=3, fontsize="small")
         paths.append(save(fig, folder, "optimality.png"))
 
-    by_statistic("delta", "Summary best δ of the grid over prefixes, learned PMA, by n",
+    by_statistic("delta", "Summary best δ of the grid over prefixes, GPLA, by n",
                  "best δ (slots; exp1: ranks)", "best_delta.png",
                  compares=[("exp3_delta", "static best, same PMA (exp3)", "--", "s"),
                            ("exp1_delta", "static best, sorted array (exp1)", ":", "^")])
     if all("overhead" in summary[n] for n in sizes):
-        by_statistic("overhead_grid", "Summary overhead of the learned PMA over the static best on the same PMA, by n",
+        by_statistic("overhead_grid", "Summary overhead of the GPLA over the static best on the same PMA, by n",
                      "grid's best minus exp3's static best\nover the same grid (query complexity)", "overhead.png",
                      compares=[("overhead", "over exp3's static best over every δ", "--", "s")])
     if all("overhead_exp1" in summary[n] for n in sizes):
-        by_statistic("overhead_exp1", "Summary overhead of the learned PMA over the sorted array, by n",
+        by_statistic("overhead_exp1", "Summary overhead of the GPLA over the sorted array, by n",
                      "grid's best minus exp1's static best\n(query complexity)", "overhead_exp1.png",
                      compares=[("pma_overhead", "the PMA's part: exp3's static best minus exp1's", "--", "s")])
 
@@ -368,7 +368,7 @@ def plot_overall(summary, meta, figures):
         by_delta("microseconds", timed, axis)
         axis.set_yscale("log")
         hull = (meta or {}).get("hull", "")
-        axis.set_title("Time per insert, learned PMA" + (f" ({hull})" if hull else "") + ", by n")
+        axis.set_title("Time per insert, GPLA" + (f" ({hull})" if hull else "") + ", by n")
         axis.set_ylabel("µs per insert, averaged over the n inserts")
         n_axis(axis, timed)
         axis.legend(ncol=3, fontsize="small")

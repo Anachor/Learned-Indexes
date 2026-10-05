@@ -26,7 +26,7 @@
 #include "hull.hpp"
 #include "vector_hull.hpp"
 
-namespace lpma {
+namespace gpla {
 
 template <size_t LeafSize>
 class BasicTreeHull {
@@ -492,4 +492,4 @@ using TreeHull = BasicTreeHull<32>;
 
 static_assert(Hull<TreeHull>);
 
-}  // namespace lpma
+}  // namespace gpla

@@ -13,7 +13,7 @@
 
 #include "../Hull/hull.hpp"
 
-namespace lpma {
+namespace gpla {
 
 template <Hull H>
 struct Segment {
@@ -74,4 +74,4 @@ struct Segment {
     }
 };
 
-}  // namespace lpma
+}  // namespace gpla

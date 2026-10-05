@@ -11,7 +11,7 @@
 #include "tree_hull.hpp"
 #include "vector_hull.hpp"
 
-namespace lpma {
+namespace gpla {
 
 inline constexpr const char *HULL_NAMES = "scan, vector, tree, tree1, tree4, tree8, tree16, tree32, tree64 or tree128";
 
@@ -32,4 +32,4 @@ bool with_hull(const std::string &name, F &&f) {
     return true;
 }
 
-}  // namespace lpma
+}  // namespace gpla

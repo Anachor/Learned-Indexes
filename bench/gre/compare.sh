@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A first comparison of the learned PMA with GRE's indexes, single-threaded,
+# A first comparison of the GPLA with GRE's indexes, single-threaded,
 # under three of the paper's workloads (n = the keys used):
 #
 #   read-only   bulk load every key, then n lookups
@@ -13,8 +13,8 @@
 # file. -n N takes N of its keys, evenly spaced by rank (default 1M; 100k, 5M
 # or a number work too; "all" for every key). Each run adds a row to CSV
 # (default results/gre/<dataset>_<n>.csv); then a table of throughputs and
-# memory. INDEX defaults to alex lipp pgm btree artunsync lpma; our variants
-# are named as lpma-delta8, lpma-vector, lpma-leaf16 (bench/gre/lpma_index.h).
+# memory. INDEX defaults to alex lipp pgm btree artunsync gpla; our variants
+# are named as gpla-delta8, gpla-vector, gpla-leaf16 (bench/gre/gpla_index.h).
 #
 # Builds GRE and the sampler first (bench/gre/build.sh: quick when nothing
 # changed), so the runs use the code as it is.
@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
         *) INDEXES+=("$1"); shift ;;
     esac
 done
-[ ${#INDEXES[@]} -gt 0 ] || INDEXES=(alex lipp pgm btree artunsync lpma)
+[ ${#INDEXES[@]} -gt 0 ] || INDEXES=(alex lipp pgm btree artunsync gpla)
 if [[ $N =~ ^([0-9]+)([kKM]?)$ ]]; then
     case "${BASH_REMATCH[2]}" in
         k | K) N=$((10#${BASH_REMATCH[1]} * 1000)) ;;

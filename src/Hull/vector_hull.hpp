@@ -10,7 +10,7 @@
 
 #include "hull.hpp"
 
-namespace lpma {
+namespace gpla {
 
 struct VectorHull {
     std::vector<Pt> upper, lower;  // both from the first point to the last, no three collinear
@@ -74,4 +74,4 @@ struct VectorHull {
 
 static_assert(Hull<VectorHull>);
 
-}  // namespace lpma
+}  // namespace gpla

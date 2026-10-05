@@ -11,12 +11,12 @@
 //   g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls
 //   ./tests/hulls [-i iterations] [-n MAXN] [seed]
 
-#include "lpma_common.hpp"
+#include "gpla_common.hpp"
 
 // Splits s around gap and compares the pieces with pieces built from scratch.
 template <class H>
-const char *split_problem(const lpma::Segment<H> &s, SlotRange gap, const PointView &pts, int64_t k) {
-    using Seg = lpma::Segment<H>;
+const char *split_problem(const gpla::Segment<H> &s, SlotRange gap, const PointView &pts, int64_t k) {
+    using Seg = gpla::Segment<H>;
     std::optional<SlotRange> left, right;  // the expected pieces
     for (size_t slot = s.slots.begin; slot < s.slots.end; ++slot) {
         if (!pts.occupied(slot)) continue;
@@ -44,8 +44,8 @@ SlotRange random_gap(std::mt19937_64 &rng, SlotRange s) {
 // joined segment, if any, goes to joined.
 template <class H>
 const char *join_problem(const PointView &pts, SlotRange ls, ExactLine ll, SlotRange rs, ExactLine rl, int64_t k,
-                         bool fits, std::optional<lpma::Segment<H>> &joined, std::mt19937_64 &rng) {
-    using Seg = lpma::Segment<H>;
+                         bool fits, std::optional<gpla::Segment<H>> &joined, std::mt19937_64 &rng) {
+    using Seg = gpla::Segment<H>;
     Seg l = Seg::build(pts, ls, ll), r = Seg::build(pts, rs, rl);
     const Seg l_before = l, r_before = r;
     auto j = Seg::try_join(l, r, pts, k);
@@ -71,7 +71,7 @@ const char *runs_problem(std::mt19937_64 &rng, size_t n, int64_t k) {
     }
     // From slots[i], at most max_len points that one line fits: (end, line).
     auto run = [&](size_t i, size_t max_len) {
-        Fitter &f = lpma::scratch_fitter(k);
+        Fitter &f = gpla::scratch_fitter(k);
         size_t j = i;
         while (j < slots.size() && j - i < max_len && f.add(pts.at(slots[j]))) ++j;
         return std::pair{j, f.line()};
@@ -85,10 +85,10 @@ const char *runs_problem(std::mt19937_64 &rng, size_t n, int64_t k) {
         SlotRange ls{slots[i], slots[j - 1] + 1}, rs{slots[j], slots[end - 1] + 1};
         bool fits = brute_fits(points_of(pts, {ls.begin, rs.end}), k);
 
-        std::optional<lpma::Segment<ScanHull>> j0;
-        std::optional<lpma::Segment<VectorHull>> j1;
-        std::optional<lpma::Segment<TreeHull>> j2;
-        std::optional<lpma::Segment<SmallTreeHull>> j3;
+        std::optional<gpla::Segment<ScanHull>> j0;
+        std::optional<gpla::Segment<VectorHull>> j1;
+        std::optional<gpla::Segment<TreeHull>> j2;
+        std::optional<gpla::Segment<SmallTreeHull>> j3;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j0, rng)) return p;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j1, rng)) return p;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j2, rng)) return p;

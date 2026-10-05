@@ -1,6 +1,6 @@
 #pragma once
 
-// What the learned PMA's tests share: brute force, random inputs, and the
+// What the GPLA's tests share: brute force, random inputs, and the
 // comparison of the three hulls' segments. SmallTreeHull, T2 with leaves of two
 // points, splits and merges leaves at almost every step.
 
@@ -20,25 +20,25 @@
 #include "../src/Hull/scan_hull.hpp"
 #include "../src/Hull/tree_hull.hpp"
 #include "../src/Hull/vector_hull.hpp"
-#include "../src/LPMA/learned_pma.hpp"
+#include "../src/GPLA/gpla.hpp"
 #include "../src/ORourke/brute_orourke.hpp"
 
-using lpma::ExactLine;
-using lpma::Fitter;
-using lpma::i128;
-using lpma::Key;
-using lpma::PointView;
-using lpma::Pt;
-using lpma::ScanHull;
-using lpma::SlotRange;
-using lpma::BasicTreeHull;
-using lpma::TreeHull;
-using lpma::VectorHull;
+using gpla::ExactLine;
+using gpla::Fitter;
+using gpla::i128;
+using gpla::Key;
+using gpla::PointView;
+using gpla::Pt;
+using gpla::ScanHull;
+using gpla::SlotRange;
+using gpla::BasicTreeHull;
+using gpla::TreeHull;
+using gpla::VectorHull;
 
 constexpr Key KEY_MIN = std::numeric_limits<Key>::min(), KEY_MAX = std::numeric_limits<Key>::max();
 
 // The bounds tried: delta = 0 to 512, and the largest allowed.
-const std::vector<int64_t> KS = {0, 1, 2, 3, 4, 8, 16, 64, 1024, lpma::MAX_K};
+const std::vector<int64_t> KS = {0, 1, 2, 3, 4, 8, 16, 64, 1024, gpla::MAX_K};
 
 using SmallTreeHull = BasicTreeHull<2>;
 
@@ -77,7 +77,7 @@ int failed(const std::string &where, F &&check) {
     return 1;
 }
 
-// Does one line fit the points? By BruteORourke, independent of lpma.
+// Does one line fit the points? By BruteORourke, independent of gpla.
 inline bool brute_fits(const std::vector<Pt> &points, int64_t k) {
     BruteORourke<int64_t> brute(k);
     for (const Pt &p : points) {
@@ -168,8 +168,8 @@ inline std::pair<std::vector<Key>, std::string> random_keys(std::mt19937_64 &rng
 // The three hulls' segments are the same structure: the same keys and slots,
 // the same line, and T2's hull (any leaf size) is T1's.
 template <class T2>
-const char *structure_problem(const lpma::Segment<ScanHull> &s0, const lpma::Segment<VectorHull> &s1,
-                              const lpma::Segment<T2> &s2) {
+const char *structure_problem(const gpla::Segment<ScanHull> &s0, const gpla::Segment<VectorHull> &s1,
+                              const gpla::Segment<T2> &s2) {
     if (s0.first != s1.first || s0.first != s2.first || s0.last != s1.last || s0.last != s2.last ||
         s0.slots != s1.slots || s0.slots != s2.slots)
         return "the hulls give different segments";

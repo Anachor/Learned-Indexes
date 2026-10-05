@@ -11,7 +11,7 @@
 
 #include "geometry.hpp"
 
-namespace lpma {
+namespace gpla {
 
 // The line through a1, a2 is above the line through b1, b2 at x.
 inline bool above_at(Pt a1, Pt a2, Pt b1, Pt b2, int64_t x) {
@@ -133,4 +133,4 @@ std::optional<ExactLine> lowest_line(const ChainU &U, const ChainD &D, int64_t k
     return line;
 }
 
-}  // namespace lpma
+}  // namespace gpla

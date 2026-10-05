@@ -25,10 +25,10 @@
 #include "../PMA/pma.hpp"
 #include "segment.hpp"
 
-namespace lpma {
+namespace gpla {
 
 template <Hull H, class Storage = PMA<>, class Less = std::less<Key>>
-class LearnedPMA {
+class GPLA {
 public:
     using Seg = Segment<H>;
 
@@ -40,8 +40,8 @@ public:
     };
 
     // k = 2 * delta: the points are (key, 2 * slot).
-    explicit LearnedPMA(int64_t k) : k_(k), fitter_(k) {
-        if (k < 0 || k > MAX_K) throw std::invalid_argument("LearnedPMA: k must be in [0, 2^58]");
+    explicit GPLA(int64_t k) : k_(k), fitter_(k) {
+        if (k < 0 || k > MAX_K) throw std::invalid_argument("GPLA: k must be in [0, 2^58]");
     }
 
     // Inserts x; false if it is already there.
@@ -83,10 +83,10 @@ private:
 };
 
 template <Hull H, class Storage, class Less>
-bool LearnedPMA<H, Storage, Less>::insert(Key x) {
+bool GPLA<H, Storage, Less>::insert(Key x) {
     PackedMemoryArray::Update update;
     if (!pma_.insert(x, &update)) return false;
-    if (pma_.capacity() > MAX_CAPACITY) throw std::length_error("LearnedPMA: capacity above 2^57");
+    if (pma_.capacity() > MAX_CAPACITY) throw std::length_error("GPLA: capacity above 2^57");
     ++stats_.inserts;
     if (update.grew()) {
         ++stats_.grows;
@@ -100,8 +100,8 @@ bool LearnedPMA<H, Storage, Less>::insert(Key x) {
 
 // Replaces the segments around the slots an insert rewrote.
 template <Hull H, class Storage, class Less>
-void LearnedPMA<H, Storage, Less>::repair(const PackedMemoryArray::Update &update) {
-    if (update.old_slots != update.new_slots) throw std::logic_error("LearnedPMA: old and new slots differ");
+void GPLA<H, Storage, Less>::repair(const PackedMemoryArray::Update &update) {
+    if (update.old_slots != update.new_slots) throw std::logic_error("GPLA: old and new slots differ");
     PointView pts = view();
     auto [first, last] = *update.affected_keys;
     Less less = segments_.key_comp();
@@ -156,7 +156,7 @@ void LearnedPMA<H, Storage, Less>::repair(const PackedMemoryArray::Update &updat
 // are not tried: greedy made the first one maximal. A pair that fails stays
 // apart, as later joins only add to its right side. At most 4 attempts.
 template <Hull H, class Storage, class Less>
-std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::join_neighbours(std::vector<Seg> &pieces,
+std::vector<Segment<H>> GPLA<H, Storage, Less>::join_neighbours(std::vector<Seg> &pieces,
                                                                        const std::vector<bool> &rebuilt) {
     std::vector<Seg> joined;
     for (size_t i = 0; i < pieces.size(); ++i) {
@@ -175,7 +175,7 @@ std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::join_neighbours(std::vecto
 
 // Greedy O'Rourke over the points in slots r.
 template <Hull H, class Storage, class Less>
-std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::segment(SlotRange r) {
+std::vector<Segment<H>> GPLA<H, Storage, Less>::segment(SlotRange r) {
     PointView pts = view();
     std::vector<Seg> out;
     size_t begin = NONE, last = NONE;
@@ -201,7 +201,7 @@ std::vector<Segment<H>> LearnedPMA<H, Storage, Less>::segment(SlotRange r) {
 // The segment around x, then its line: x's successor is at a slot in
 // [ceil((line(x) - k) / 2), floor((line(x) + k) / 2)], even when x is absent.
 template <Hull H, class Storage, class Less>
-std::optional<size_t> LearnedPMA<H, Storage, Less>::lower_bound_slot(Key x) const {
+std::optional<size_t> GPLA<H, Storage, Less>::lower_bound_slot(Key x) const {
     if (segments_.empty()) return std::nullopt;
     auto next = segments_.upper_bound(x);
     if (next == segments_.begin()) return next->second.slots.begin;  // below every key
@@ -223,12 +223,12 @@ std::optional<size_t> LearnedPMA<H, Storage, Less>::lower_bound_slot(Key x) cons
         else b = t;
     }
     size_t slot = view().next_occupied(a, s.slots.end);
-    if (slot == NONE) throw std::logic_error("LearnedPMA: the successor is not where the line puts it");
+    if (slot == NONE) throw std::logic_error("GPLA: the successor is not where the line puts it");
     return slot;
 }
 
 template <Hull H, class Storage, class Less>
-const char *LearnedPMA<H, Storage, Less>::problem() const {
+const char *GPLA<H, Storage, Less>::problem() const {
     if (!pma_.check()) return "PMA invariants";
     PointView pts = view();
     size_t covered = 0, next = 0;
@@ -250,4 +250,4 @@ const char *LearnedPMA<H, Storage, Less>::problem() const {
     return nullptr;
 }
 
-}  // namespace lpma
+}  // namespace gpla

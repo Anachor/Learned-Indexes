@@ -1,10 +1,10 @@
-// O'Rourke (lpma::Fitter), which everything else relies on, against
+// O'Rourke (gpla::Fitter), which everything else relies on, against
 // BruteORourke on random points, and fraction_less against products.
 //
 //   g++-11 -std=c++20 -O2 tests/fitter.cpp -o tests/fitter
 //   ./tests/fitter [-i iterations] [-n MAXN] [seed]
 
-#include "lpma_common.hpp"
+#include "gpla_common.hpp"
 
 // Greedy segments: the same as BruteORourke's, and each line fits its points.
 const char *greedy_problem(const std::vector<Pt> &points, int64_t k) {
@@ -69,9 +69,9 @@ const char *fraction_problem(std::mt19937_64 &rng) {
             d = 3 * b;
         }
         bool less = a * d < c * b;
-        if (lpma::fraction_less(a, b, c, d) != less) return "fraction_less";
+        if (gpla::fraction_less(a, b, c, d) != less) return "fraction_less";
         i128 s = 1 + (i128(rng()) << (rng() % 37)), u = 1 + (i128(rng()) << (rng() % 37));
-        if (lpma::fraction_less(a * s, b * s, c * u, d * u) != less) return "fraction_less on large terms";
+        if (gpla::fraction_less(a * s, b * s, c * u, d * u) != less) return "fraction_less on large terms";
     }
     return nullptr;
 }

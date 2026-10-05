@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build GRE's microbench with the learned PMA in it, and the dataset sampler.
+# Build GRE's microbench with the GPLA in it, and the dataset sampler.
 #
 #   bench/gre/build.sh          (CC and CXX override the compilers)
 #
-# third_party/GRE gets gre.patch - the lpma indexes in competitor.h, and
-# lpma_index.cpp compiled as C++20 in CMakeLists.txt - unless it has it already.
+# third_party/GRE gets gre.patch - the gpla indexes in competitor.h, and
+# gpla_index.cpp compiled as C++20 in CMakeLists.txt - unless it has it already.
 # GRE needs TBB, jemalloc and MKL: apt-get install libtbb-dev libjemalloc-dev libmkl-dev.
 
 set -euo pipefail

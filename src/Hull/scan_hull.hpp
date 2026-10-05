@@ -8,7 +8,7 @@
 
 #include "hull.hpp"
 
-namespace lpma {
+namespace gpla {
 
 struct ScanHull {
     bool operator==(const ScanHull &) const = default;
@@ -28,4 +28,4 @@ struct ScanHull {
 
 static_assert(Hull<ScanHull>);
 
-}  // namespace lpma
+}  // namespace gpla

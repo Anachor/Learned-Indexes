@@ -17,7 +17,7 @@
 #include "../PMA/packed_memory_array.hpp"
 #include "geometry.hpp"
 
-namespace lpma {
+namespace gpla {
 
 using SlotRange = PackedMemoryArray::SlotRange;
 
@@ -97,4 +97,4 @@ inline size_t optimal_segments(const PointView &pts, SlotRange r, int64_t k) {
     return segments;
 }
 
-}  // namespace lpma
+}  // namespace gpla

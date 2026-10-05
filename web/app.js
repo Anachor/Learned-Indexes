@@ -206,7 +206,7 @@ function renderRunMeta(run) {
     row("permutation", code(meta.permutation), aside(describePermutation(meta.permutation)));
   }
   if (meta.structure) row("structure", meta.structure);
-  // The learned PMA (exp4): what each segment keeps to test joins.
+  // The GPLA (exp4): what each segment keeps to test joins.
   if (meta.hull) {
     row("hull", code(meta.hull),
         aside(meta.hull === "ScanHull" ? "a join reads every point of both segments"

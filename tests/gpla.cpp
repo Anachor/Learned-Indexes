@@ -1,4 +1,4 @@
-// The learned PMA (src/LPMA) with all three hulls side by side - T2 twice, with
+// The GPLA (src/GPLA) with all three hulls side by side - T2 twice, with
 // TreeHull's leaves and SmallTreeHull's - on random insert sequences over three
 // PMAs: the default, a sparse one, and GapPMA (gap_pma.hpp), which cuts
 // segments without moving keys. After every insert: each index passes
@@ -8,20 +8,20 @@
 // checks that no two neighbours can be joined and at most 2 * optimal - 1
 // segments.
 //
-//   g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma
-//   ./tests/lpma [-i iterations] [-n MAXN] [seed]
+//   g++-11 -std=c++20 -O2 tests/gpla.cpp -o tests/gpla
+//   ./tests/gpla [-i iterations] [-n MAXN] [seed]
 
 #include <iterator>
 
 #include "gap_pma.hpp"
-#include "lpma_common.hpp"
+#include "gpla_common.hpp"
 
 template <class Storage>
 struct Indexes {
-    lpma::LearnedPMA<ScanHull, Storage> t0;
-    lpma::LearnedPMA<VectorHull, Storage> t1;
-    lpma::LearnedPMA<TreeHull, Storage> t2;
-    lpma::LearnedPMA<SmallTreeHull, Storage> t3;
+    gpla::GPLA<ScanHull, Storage> t0;
+    gpla::GPLA<VectorHull, Storage> t1;
+    gpla::GPLA<TreeHull, Storage> t2;
+    gpla::GPLA<SmallTreeHull, Storage> t3;
     explicit Indexes(int64_t k) : t0(k), t1(k), t2(k), t3(k) {}
 };
 
@@ -136,6 +136,6 @@ int main(int argc, char **argv) {
         failures += index_case<SparsePMA>(keys, k, where + " sparse PMA", rng);
         failures += index_case<GapPMA>(keys, k, where + " GapPMA", rng);
     }
-    std::cout << "lpma: " << args.iterations << " cases x 3 PMAs, " << failures << " failures\n";
+    std::cout << "gpla: " << args.iterations << " cases x 3 PMAs, " << failures << " failures\n";
     return failures ? 1 : 0;
 }

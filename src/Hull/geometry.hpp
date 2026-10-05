@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace lpma {
+namespace gpla {
 
 using Key = int64_t;
 using i128 = __int128;
@@ -157,4 +157,4 @@ private:
     size_t upper_start_ = 0, lower_start_ = 0;
 };
 
-}  // namespace lpma
+}  // namespace gpla

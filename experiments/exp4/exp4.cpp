@@ -20,7 +20,7 @@
 #include "../../src/Hull/scan_hull.hpp"
 #include "../../src/Hull/tree_hull.hpp"
 #include "../../src/Hull/vector_hull.hpp"
-#include "../../src/LPMA/learned_pma.hpp"
+#include "../../src/GPLA/gpla.hpp"
 #include "../../src/ORourke/pgm_orourke.hpp"
 #include "../../src/PMA/pma.hpp"
 #include "../common/permutation.hpp"
@@ -35,11 +35,11 @@ inline int omp_get_num_procs() { return 1; }
 inline void omp_set_num_threads(int) {}
 #endif
 
-// Experiment 4: query complexity of the learned PMA (src/LPMA), our dynamic
+// Experiment 4: query complexity of the GPLA (src/GPLA), our dynamic
 // structure, at every prefix.
 //
 // The keys of a permutation of {1..n} are inserted one at a time into a
-// LearnedPMA, once for each delta of a grid (--deltas, default 0.5, 1, 2, ...,
+// GPLA, once for each delta of a grid (--deltas, default 0.5, 1, 2, ...,
 // 1024), each keeping its delta throughout. After every insert, its number of
 // segments lambda:
 //
@@ -109,7 +109,7 @@ DeltaRun run_delta(const std::vector<int64_t> &permutation, int64_t k, Progress 
     r.k = k;
     r.segments.assign(n + 1, 0);
     r.capacity.assign(n + 1, 0);
-    lpma::LearnedPMA<H> index(k);
+    gpla::GPLA<H> index(k);
 
     auto started = std::chrono::steady_clock::now();
     auto last_drawn = started;
@@ -156,9 +156,9 @@ std::vector<DeltaRun> run_n(size_t n, uint64_t seed, const std::vector<int64_t> 
     #pragma omp parallel for schedule(dynamic, 1)
     for (size_t j = 0; j < order.size(); ++j) {
         size_t d = order[j];
-        if (hull == "scan") runs[d] = run_delta<lpma::ScanHull>(permutation, ks[d], progress);
-        else if (hull == "tree") runs[d] = run_delta<lpma::TreeHull>(permutation, ks[d], progress);
-        else runs[d] = run_delta<lpma::VectorHull>(permutation, ks[d], progress);
+        if (hull == "scan") runs[d] = run_delta<gpla::ScanHull>(permutation, ks[d], progress);
+        else if (hull == "tree") runs[d] = run_delta<gpla::TreeHull>(permutation, ks[d], progress);
+        else runs[d] = run_delta<gpla::VectorHull>(permutation, ks[d], progress);
     }
     return runs;
 }
@@ -172,9 +172,9 @@ bool validate(size_t n, uint64_t seed, const std::vector<int64_t> &ks) {
     std::vector<int64_t> permutation = make_permutation(n, seed);
     PgmORourke<int64_t> pgm(1);
     for (int64_t k : ks) {
-        lpma::LearnedPMA<lpma::ScanHull> scan(k);
-        lpma::LearnedPMA<lpma::VectorHull> vector(k);
-        lpma::LearnedPMA<lpma::TreeHull> tree(k);
+        gpla::GPLA<gpla::ScanHull> scan(k);
+        gpla::GPLA<gpla::VectorHull> vector(k);
+        gpla::GPLA<gpla::TreeHull> tree(k);
         PMA<> plain;
         std::set<int64_t> inserted;
         std::vector<int64_t> keys, slots, other_keys, other_slots;
@@ -278,7 +278,7 @@ std::vector<int64_t> parse_deltas(const std::string &s, const char *program) {
         } catch (const std::exception &) {
             usage(program);
         }
-        if (!(k >= 1 && k <= double(lpma::MAX_K)) || k != std::floor(k)) {
+        if (!(k >= 1 && k <= double(gpla::MAX_K)) || k != std::floor(k)) {
             std::cerr << "delta " << token << " is not a positive multiple of 0.5\n";
             usage(program);
         }
@@ -394,8 +394,8 @@ int main(int argc, char **argv) {
     meta.seed = seed;
     meta.sizes = sizes;
     meta.fixed_k = ks;
-    meta.cost = "log2(delta) + log2(lambda), delta in PMA slots, lambda the learned PMA's";
-    std::string structure = "learned PMA (src/LPMA), points (key, slot): " + hull +
+    meta.cost = "log2(delta) + log2(lambda), delta in PMA slots, lambda the GPLA's";
+    std::string structure = "GPLA (src/GPLA), points (key, slot): " + hull +
                             " hull, no two neighbouring segments joinable";
     std::map<size_t, std::string> inserts;  // per n, inserts_json
     auto set_extra = [&] {
@@ -407,7 +407,7 @@ int main(int argc, char **argv) {
         meta.extra = {{"structure", json_string(structure)},
                       {"pma", pma_json()},
                       {"hull", json_string(hull == "scan"   ? "ScanHull"
-                                           : hull == "tree" ? "TreeHull<" + std::to_string(lpma::TreeHull::LEAF_SIZE) + ">"
+                                           : hull == "tree" ? "TreeHull<" + std::to_string(gpla::TreeHull::LEAF_SIZE) + ">"
                                                             : "VectorHull")},
                       {"inserts", json}};
     };

@@ -1,4 +1,4 @@
-// Insert and lookup time of the learned PMA with each hull: T0 (scan),
+// Insert and lookup time of the GPLA with each hull: T0 (scan),
 // T1 (vector), T2 (tree, or tree1 ... tree128 for other leaf sizes:
 // src/Hull/by_name.hpp), and a lookup's key comparisons against
 // qc = log2(delta) + log2(lambda).
@@ -16,8 +16,8 @@
 // the line's 2*delta + 1 slots, ~log2 delta + 1). The PMA's own search, used by
 // inserts, is not counted.
 //
-//   g++-11 -std=c++20 -O2 tests/lpma_speed.cpp -o tests/lpma_speed
-//   ./tests/lpma_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls H,...] [-q Q] [-r R] [--csv FILE] [seed]
+//   g++-11 -std=c++20 -O2 tests/gpla_speed.cpp -o tests/gpla_speed
+//   ./tests/gpla_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls H,...] [-q Q] [-r R] [--csv FILE] [seed]
 //
 // Orders: sorted, reverse, or an experiments --permutation (uniform, zipf:16,1, ...).
 
@@ -35,10 +35,10 @@
 #include "../experiments/common/permutation.hpp"
 #include "../experiments/common/segmentation.hpp"
 #include "../src/Hull/by_name.hpp"
-#include "../src/LPMA/learned_pma.hpp"
+#include "../src/GPLA/gpla.hpp"
 
 using Clock = std::chrono::steady_clock;
-using lpma::Key;
+using gpla::Key;
 
 volatile uint64_t sink;  // keeps the lookups from being optimised away
 
@@ -49,7 +49,7 @@ struct Result {
 
 template <class H>
 Result run(const std::vector<Key> &keys, int64_t k, const std::vector<Key> &lookups) {
-    lpma::LearnedPMA<H> index(k);
+    gpla::GPLA<H> index(k);
     std::vector<double> us;
     for (Key key : keys) {
         auto start = Clock::now();
@@ -74,8 +74,8 @@ Result run(const std::vector<Key> &keys, int64_t k, const std::vector<Key> &look
 
 Result run(const std::string &hull, const std::vector<Key> &keys, int64_t k, const std::vector<Key> &lookups) {
     Result r;
-    if (!lpma::with_hull(hull, [&](auto h) { r = run<typename decltype(h)::type>(keys, k, lookups); })) {
-        std::cerr << "unknown hull " << hull << " (" << lpma::HULL_NAMES << ")\n";
+    if (!gpla::with_hull(hull, [&](auto h) { r = run<typename decltype(h)::type>(keys, k, lookups); })) {
+        std::cerr << "unknown hull " << hull << " (" << gpla::HULL_NAMES << ")\n";
         std::exit(2);
     }
     return r;
@@ -97,7 +97,7 @@ struct Comparisons {
 
 template <class H>
 Comparisons count_comparisons(const std::vector<Key> &keys, int64_t k, const std::vector<Key> &lookups) {
-    lpma::LearnedPMA<H, PMA<>, CountingLess> index(k);
+    gpla::GPLA<H, PMA<>, CountingLess> index(k);
     for (Key key : keys) index.insert(key);
     uint64_t segment = 0, total = 0, max = 0;
     for (Key x : lookups) {
@@ -117,7 +117,7 @@ Comparisons count_comparisons(const std::vector<Key> &keys, int64_t k, const std
 Comparisons count_comparisons(const std::string &hull, const std::vector<Key> &keys, int64_t k,
                               const std::vector<Key> &lookups) {
     Comparisons c;
-    lpma::with_hull(hull, [&](auto h) { c = count_comparisons<typename decltype(h)::type>(keys, k, lookups); });
+    gpla::with_hull(hull, [&](auto h) { c = count_comparisons<typename decltype(h)::type>(keys, k, lookups); });
     return c;
 }
 

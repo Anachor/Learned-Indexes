@@ -7,7 +7,7 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 - `notes/`: paper draft, experiment plan (`Notes.txt`), progress log (`workflow.md`)
 - `src/ORourke/`: O'Rourke interface (`orourke.hpp`) and implementations: PGM, ZLW, brute force
 - `src/PMA/`: the packed memory array (`pma.hpp`, C++20)
-- `src/LPMA/`: the learned PMA (`learned_pma.hpp`, C++20): segments of keys in a PMA, each with a line within delta of
+- `src/GPLA/`: the GPLA (`gpla.hpp`, C++20): segments of keys in a PMA, each with a line within delta of
   their slots, no two neighbours joinable (so at most 2 * optimal - 1 segments); `segment.hpp` is one segment
 - `src/Hull/`: what a segment keeps to test joins (`hull.hpp`): T0 `ScanHull` keeps nothing, T1 `VectorHull` its hull as
   vectors, T2 `TreeHull` a tree of hulls (polylog joins and splits; searches in `chains.hpp`) whose leaves hold up to B
@@ -50,18 +50,18 @@ git submodule update --init
     python3 tests/plot_pma.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
     ```
 
-- **Learned PMA** (`src/LPMA/`, `src/Hull/`, C++20), writing nothing, each `[-i iterations] [-n MAXN] [seed]`:
+- **GPLA** (`src/GPLA/`, `src/Hull/`, C++20), writing nothing, each `[-i iterations] [-n MAXN] [seed]`:
   `tests/fitter` checks the exact O'Rourke against brute force; `tests/hulls` that T0, T1 and T2 build the same
-  segments, lines and hulls, joins against brute force and splits against building from scratch; `tests/lpma` the
+  segments, lines and hulls, joins against brute force and splits against building from scratch; `tests/gpla` the
   index with all three hulls side by side on random inserts over three PMAs - after every insert its checks, the same
-  structure from all three, and `lower_bound`/`contains` against a `std::set`. `tests/lpma_speed` times inserts and
+  structure from all three, and `lower_bound`/`contains` against a `std::set`. `tests/gpla_speed` times inserts and
   lookups with each hull (the median of `-r` repeats).
     ```
     g++-11 -std=c++20 -O2 tests/fitter.cpp -o tests/fitter && ./tests/fitter
     g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls && ./tests/hulls
-    g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma && ./tests/lpma
-    g++-11 -std=c++20 -O2 tests/lpma_speed.cpp -o tests/lpma_speed
-    ./tests/lpma_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree,tree1,...,tree128] [-q Q] [-r R] [--csv FILE]
+    g++-11 -std=c++20 -O2 tests/gpla.cpp -o tests/gpla && ./tests/gpla
+    g++-11 -std=c++20 -O2 tests/gpla_speed.cpp -o tests/gpla_speed
+    ./tests/gpla_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree,tree1,...,tree128] [-q Q] [-r R] [--csv FILE]
     ```
 
 ## Experiment 1
@@ -226,7 +226,7 @@ same keys packed - is the comparison.
 
 ## Experiment 4
 
-Our dynamic structure, the learned PMA (`src/LPMA/`): the keys are inserted into it
+Our dynamic structure, the GPLA (`src/GPLA/`): the keys are inserted into it
 one at a time, once for each delta of a grid (`--deltas`, default 0.5, 1, 2, ..., 1024),
 each keeping its delta throughout, and after every insert its number of segments
 lambda gives the query complexity `log2(delta) + log2(lambda)`. Its PMA is exp3's, and
