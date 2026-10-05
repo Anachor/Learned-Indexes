@@ -1,11 +1,12 @@
 // The three hulls (src/Hull) build the same structure.
 //
-// On random runs of a PMA's points, with each hull: a join succeeds exactly
-// when brute force fits one line, a failed join changes nothing, and a split
-// equals building the pieces from scratch; then the three joined segments must
-// be the same, line and hull. And T2 alone, on points with many hull edges at
-// one slope: joins against brute force and O'Rourke's line, splits, every tree
-// node checked.
+// On random runs of a PMA's points, with each hull (T2 with TreeHull's leaves
+// and with SmallTreeHull's): a join succeeds exactly when brute force fits one
+// line, a failed join changes nothing, and a split equals building the pieces
+// from scratch; then the joined segments must be the same, line and hull. And
+// T2 alone, with leaves of 1, 2, 3 and TreeHull's points, on points with many
+// hull edges at one slope: joins against brute force and O'Rourke's line,
+// splits, every tree node and leaf checked.
 //
 //   g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls
 //   ./tests/hulls [-i iterations] [-n MAXN] [seed]
@@ -87,11 +88,14 @@ const char *runs_problem(std::mt19937_64 &rng, size_t n, int64_t k) {
         std::optional<lpma::Segment<ScanHull>> j0;
         std::optional<lpma::Segment<VectorHull>> j1;
         std::optional<lpma::Segment<TreeHull>> j2;
+        std::optional<lpma::Segment<SmallTreeHull>> j3;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j0, rng)) return p;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j1, rng)) return p;
         if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j2, rng)) return p;
+        if (const char *p = join_problem(pts, ls, ll, rs, rl, k, fits, j3, rng)) return p;
         if (j0) {
             if (const char *p = structure_problem(*j0, *j1, *j2)) return p;
+            if (const char *p = structure_problem(*j0, *j1, *j3)) return p;
         }
     }
     return nullptr;
@@ -100,6 +104,7 @@ const char *runs_problem(std::mt19937_64 &rng, size_t n, int64_t k) {
 // T2 alone, on points with y increasing: two trees cut at random, joined
 // exactly when brute force fits one line and with O'Rourke's line, then split
 // with some points dropped. Every tree must be valid and hold the right points.
+template <class T2>
 const char *tree_problem(const std::vector<Pt> &points, int64_t k, std::mt19937_64 &rng) {
     static PMA<> unused;  // TreeHull does not read the PMA
     PointView pts{unused};
@@ -109,11 +114,11 @@ const char *tree_problem(const std::vector<Pt> &points, int64_t k, std::mt19937_
     }
     if (n < 2) return nullptr;
     size_t cut = 1 + rng() % (n - 1);
-    TreeHull l = TreeHull::from_points({points.begin(), points.begin() + long(cut)});
-    TreeHull r = TreeHull::from_points({points.begin() + long(cut), points.end()});
+    T2 l = T2::from_points({points.begin(), points.begin() + long(cut)});
+    T2 r = T2::from_points({points.begin() + long(cut), points.end()});
     if (!l.valid() || !r.valid()) return "T2: a built tree";
-    const TreeHull l_before = l, r_before = r;
-    auto joined = TreeHull::try_join(l, {}, r, {}, pts, k);
+    const T2 l_before = l, r_before = r;
+    auto joined = T2::try_join(l, {}, r, {}, pts, k);
     if (joined.has_value() != brute_fits(points, k)) return "T2: try_join disagrees with brute force";
     if (!joined) return l == l_before && r == r_before ? nullptr : "T2: a failed try_join changed a tree";
 
@@ -126,7 +131,7 @@ const char *tree_problem(const std::vector<Pt> &points, int64_t k, std::mt19937_
     size_t a = rng() % (n + 1), b = a + rng() % (n - a + 1);
     SlotRange left{0, a ? size_t(points[a - 1].y / 2) + 1 : 0};
     SlotRange right{b < n ? size_t(points[b].y / 2) : size_t(points.back().y / 2) + 1, size_t(-1)};
-    auto [x, y] = TreeHull::split(std::move(joined->first), left, right, pts);
+    auto [x, y] = T2::split(std::move(joined->first), left, right, pts);
     if (!x.valid() || !y.valid()) return "T2: a split piece";
     if (x.points() != std::vector<Pt>(points.begin(), points.begin() + long(a)) ||
         y.points() != std::vector<Pt>(points.begin() + long(b), points.end()))
@@ -145,7 +150,10 @@ int main(int argc, char **argv) {
         failures += failed(where + " PMA", [&] { return runs_problem<PMA<>>(rng, n, k); });
         failures += failed(where + " sparse PMA", [&] { return runs_problem<SparsePMA>(rng, n, k); });
         std::vector<Pt> points = random_points(rng, std::min<size_t>(n, 255));
-        failures += failed(where + " T2 alone", [&] { return tree_problem(points, k, rng); });
+        failures += failed(where + " T2 alone", [&] { return tree_problem<TreeHull>(points, k, rng); });
+        failures += failed(where + " T2 alone, leaves of 1", [&] { return tree_problem<BasicTreeHull<1>>(points, k, rng); });
+        failures += failed(where + " T2 alone, leaves of 2", [&] { return tree_problem<BasicTreeHull<2>>(points, k, rng); });
+        failures += failed(where + " T2 alone, leaves of 3", [&] { return tree_problem<BasicTreeHull<3>>(points, k, rng); });
     }
     std::cout << "hulls: " << args.iterations << " cases, " << failures << " failures\n";
     return failures ? 1 : 0;

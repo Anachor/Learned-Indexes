@@ -10,8 +10,9 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 - `src/LPMA/`: the learned PMA (`learned_pma.hpp`, C++20): segments of keys in a PMA, each with a line within delta of
   their slots, no two neighbours joinable (so at most 2 * optimal - 1 segments); `segment.hpp` is one segment
 - `src/Hull/`: what a segment keeps to test joins (`hull.hpp`): T0 `ScanHull` keeps nothing, T1 `VectorHull` its hull as
-  vectors, T2 `TreeHull` a tree of hulls (polylog joins and splits; searches in `chains.hpp`). `geometry.hpp` is the
-  exact geometry and O'Rourke
+  vectors, T2 `TreeHull` a tree of hulls (polylog joins and splits; searches in `chains.hpp`) whose leaves hold up to B
+  points each: `BasicTreeHull<B>`, `TreeHull` = B 32. `by_name.hpp` names them for command lines (`tree1` ...
+  `tree128`). `geometry.hpp` is the exact geometry and O'Rourke
 - `tests/`: stress tests and speed comparison of the implementations
 - `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`;
   `experiments/common/` holds what they share (permutations, the best-delta search, run folders and `meta.json`)
@@ -60,7 +61,7 @@ git submodule update --init
     g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls && ./tests/hulls
     g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma && ./tests/lpma
     g++-11 -std=c++20 -O2 tests/lpma_speed.cpp -o tests/lpma_speed
-    ./tests/lpma_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree] [-q Q] [-r R] [--csv FILE]
+    ./tests/lpma_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree,tree1,...,tree128] [-q Q] [-r R] [--csv FILE]
     ```
 
 ## Experiment 1
@@ -231,8 +232,8 @@ each keeping its delta throughout, and after every insert its number of segments
 lambda gives the query complexity `log2(delta) + log2(lambda)`. Its PMA is exp3's, and
 the seeds, `--permutation` orders and `--tiebreaker` are exp1's, so the same seed and
 order give exp3's layouts: exp3's static O'Rourke on the same points is the
-comparison (lambda is at most 2 * that optimum - 1, at the same delta). `--hull scan`
-or `vector` (default) only changes the time.
+comparison (lambda is at most 2 * that optimum - 1, at the same delta). `--hull scan`,
+`vector` or `tree` (default) only changes the time.
 
 - **Run**: writes one CSV per n to `results/exp4/<run>/`, a row per delta and prefix
   (`seed,n,t,capacity,k,L,cost,best`, best = the grid's lowest query complexity at t),

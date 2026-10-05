@@ -1,5 +1,6 @@
 // Insert and lookup time of the learned PMA with each hull: T0 (scan),
-// T1 (vector), T2 (tree), and a lookup's key comparisons against
+// T1 (vector), T2 (tree, or tree1 ... tree128 for other leaf sizes:
+// src/Hull/by_name.hpp), and a lookup's key comparisons against
 // qc = log2(delta) + log2(lambda).
 //
 // For each n, order and delta, each hull inserts the keys 2, 4, ..., 2n in the
@@ -33,9 +34,7 @@
 
 #include "../experiments/common/permutation.hpp"
 #include "../experiments/common/segmentation.hpp"
-#include "../src/Hull/scan_hull.hpp"
-#include "../src/Hull/tree_hull.hpp"
-#include "../src/Hull/vector_hull.hpp"
+#include "../src/Hull/by_name.hpp"
 #include "../src/LPMA/learned_pma.hpp"
 
 using Clock = std::chrono::steady_clock;
@@ -74,11 +73,12 @@ Result run(const std::vector<Key> &keys, int64_t k, const std::vector<Key> &look
 }
 
 Result run(const std::string &hull, const std::vector<Key> &keys, int64_t k, const std::vector<Key> &lookups) {
-    if (hull == "scan") return run<lpma::ScanHull>(keys, k, lookups);
-    if (hull == "vector") return run<lpma::VectorHull>(keys, k, lookups);
-    if (hull == "tree") return run<lpma::TreeHull>(keys, k, lookups);
-    std::cerr << "unknown hull " << hull << " (scan, vector or tree)\n";
-    std::exit(2);
+    Result r;
+    if (!lpma::with_hull(hull, [&](auto h) { r = run<typename decltype(h)::type>(keys, k, lookups); })) {
+        std::cerr << "unknown hull " << hull << " (" << lpma::HULL_NAMES << ")\n";
+        std::exit(2);
+    }
+    return r;
 }
 
 // std::less that counts its calls.
@@ -113,12 +113,12 @@ Comparisons count_comparisons(const std::vector<Key> &keys, int64_t k, const std
     return {double(segment) / q, double(total - segment) / q, double(total) / q, max};
 }
 
-// The run()s have already turned away any other hull.
+// The run()s have already turned away an unknown hull.
 Comparisons count_comparisons(const std::string &hull, const std::vector<Key> &keys, int64_t k,
                               const std::vector<Key> &lookups) {
-    if (hull == "scan") return count_comparisons<lpma::ScanHull>(keys, k, lookups);
-    if (hull == "vector") return count_comparisons<lpma::VectorHull>(keys, k, lookups);
-    return count_comparisons<lpma::TreeHull>(keys, k, lookups);
+    Comparisons c;
+    lpma::with_hull(hull, [&](auto h) { c = count_comparisons<typename decltype(h)::type>(keys, k, lookups); });
+    return c;
 }
 
 // Each figure's median over the repeats.

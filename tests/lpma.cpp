@@ -1,9 +1,10 @@
-// The learned PMA (src/LPMA) with all three hulls side by side, on random
-// insert sequences over three PMAs: the default, a sparse one, and GapPMA
-// (gap_pma.hpp), which cuts segments without moving keys. After every insert:
-// each index passes problem(); the three hold the same structure and made the
-// same decisions; lower_bound and contains agree with a std::set; at most 4
-// join attempts; a duplicate changes nothing. Up to 24 keys, BruteORourke also
+// The learned PMA (src/LPMA) with all three hulls side by side - T2 twice, with
+// TreeHull's leaves and SmallTreeHull's - on random insert sequences over three
+// PMAs: the default, a sparse one, and GapPMA (gap_pma.hpp), which cuts
+// segments without moving keys. After every insert: each index passes
+// problem(); all hold the same structure and made the same decisions;
+// lower_bound and contains agree with a std::set; at most 4 join attempts; a
+// duplicate changes nothing. Up to 24 keys, BruteORourke also
 // checks that no two neighbours can be joined and at most 2 * optimal - 1
 // segments.
 //
@@ -20,7 +21,8 @@ struct Indexes {
     lpma::LearnedPMA<ScanHull, Storage> t0;
     lpma::LearnedPMA<VectorHull, Storage> t1;
     lpma::LearnedPMA<TreeHull, Storage> t2;
-    explicit Indexes(int64_t k) : t0(k), t1(k), t2(k) {}
+    lpma::LearnedPMA<SmallTreeHull, Storage> t3;
+    explicit Indexes(int64_t k) : t0(k), t1(k), t2(k), t3(k) {}
 };
 
 template <class A, class B>
@@ -33,14 +35,19 @@ bool same_stats(const A &a, const B &b) {
 // The three hold the same segments, lines and hulls, and made the same decisions.
 template <class Storage>
 const char *same_structure(const Indexes<Storage> &x) {
-    if (!same_stats(x.t0.stats(), x.t1.stats()) || !same_stats(x.t0.stats(), x.t2.stats()))
+    if (!same_stats(x.t0.stats(), x.t1.stats()) || !same_stats(x.t0.stats(), x.t2.stats()) ||
+        !same_stats(x.t0.stats(), x.t3.stats()))
         return "the hulls made different decisions";
-    if (x.t0.segment_count() != x.t1.segment_count() || x.t0.segment_count() != x.t2.segment_count())
+    if (x.t0.segment_count() != x.t1.segment_count() || x.t0.segment_count() != x.t2.segment_count() ||
+        x.t0.segment_count() != x.t3.segment_count())
         return "the hulls give different numbers of segments";
     auto s1 = x.t1.segments().begin();
     auto s2 = x.t2.segments().begin();
+    auto s3 = x.t3.segments().begin();
     for (const auto &[key, s0] : x.t0.segments()) {
-        if (const char *p = structure_problem(s0, (s1++)->second, (s2++)->second)) return p;
+        const auto &v = (s1++)->second;
+        if (const char *p = structure_problem(s0, v, (s2++)->second)) return p;
+        if (const char *p = structure_problem(s0, v, (s3++)->second)) return p;
     }
     return nullptr;
 }
@@ -79,12 +86,12 @@ const char *insert_problem(Indexes<Storage> &x, std::set<Key> &expected, Key key
     bool fresh = expected.insert(key).second;
     auto before = x.t2.segments();
     auto stats = x.t0.stats();
-    bool i0 = x.t0.insert(key), i1 = x.t1.insert(key), i2 = x.t2.insert(key);
-    if (i0 != fresh || i1 != fresh || i2 != fresh) return "insert's return value";
+    bool i0 = x.t0.insert(key), i1 = x.t1.insert(key), i2 = x.t2.insert(key), i3 = x.t3.insert(key);
+    if (i0 != fresh || i1 != fresh || i2 != fresh || i3 != fresh) return "insert's return value";
     if (!fresh && (x.t2.segments() != before || x.t0.stats() != stats)) return "a duplicate changed the index";
     if (x.t0.stats().join_attempts - stats.join_attempts > 4) return "more than 4 join attempts";
 
-    for (const char *p : {x.t0.problem(), x.t1.problem(), x.t2.problem(), same_structure(x)}) {
+    for (const char *p : {x.t0.problem(), x.t1.problem(), x.t2.problem(), x.t3.problem(), same_structure(x)}) {
         if (p) return p;
     }
     if (fresh && expected.size() <= 24) {
@@ -93,10 +100,12 @@ const char *insert_problem(Indexes<Storage> &x, std::set<Key> &expected, Key key
     for (Key probe : probes(expected, rng)) {
         auto it = expected.lower_bound(probe);
         std::optional<Key> want = it == expected.end() ? std::nullopt : std::optional<Key>(*it);
-        if (x.t0.lower_bound(probe) != want || x.t1.lower_bound(probe) != want || x.t2.lower_bound(probe) != want)
+        if (x.t0.lower_bound(probe) != want || x.t1.lower_bound(probe) != want || x.t2.lower_bound(probe) != want ||
+            x.t3.lower_bound(probe) != want)
             return "lower_bound";
         bool present = expected.count(probe);
-        if (x.t0.contains(probe) != present || x.t1.contains(probe) != present || x.t2.contains(probe) != present)
+        if (x.t0.contains(probe) != present || x.t1.contains(probe) != present || x.t2.contains(probe) != present ||
+            x.t3.contains(probe) != present)
             return "contains";
     }
     return nullptr;

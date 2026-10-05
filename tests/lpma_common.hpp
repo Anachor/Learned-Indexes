@@ -1,7 +1,8 @@
 #pragma once
 
 // What the learned PMA's tests share: brute force, random inputs, and the
-// comparison of the three hulls' segments.
+// comparison of the three hulls' segments. SmallTreeHull, T2 with leaves of two
+// points, splits and merges leaves at almost every step.
 
 #include <algorithm>
 #include <cstdint>
@@ -30,6 +31,7 @@ using lpma::PointView;
 using lpma::Pt;
 using lpma::ScanHull;
 using lpma::SlotRange;
+using lpma::BasicTreeHull;
 using lpma::TreeHull;
 using lpma::VectorHull;
 
@@ -37,6 +39,8 @@ constexpr Key KEY_MIN = std::numeric_limits<Key>::min(), KEY_MAX = std::numeric_
 
 // The bounds tried: delta = 0 to 512, and the largest allowed.
 const std::vector<int64_t> KS = {0, 1, 2, 3, 4, 8, 16, 64, 1024, lpma::MAX_K};
+
+using SmallTreeHull = BasicTreeHull<2>;
 
 using SparsePMA = PMA<PMAParams{.leaf_upper = 0.9, .root_upper = 0.5, .initial_capacity = 2}>;
 
@@ -162,9 +166,10 @@ inline std::pair<std::vector<Key>, std::string> random_keys(std::mt19937_64 &rng
 }
 
 // The three hulls' segments are the same structure: the same keys and slots,
-// the same line, and T2's hull is T1's.
-inline const char *structure_problem(const lpma::Segment<ScanHull> &s0, const lpma::Segment<VectorHull> &s1,
-                                     const lpma::Segment<TreeHull> &s2) {
+// the same line, and T2's hull (any leaf size) is T1's.
+template <class T2>
+const char *structure_problem(const lpma::Segment<ScanHull> &s0, const lpma::Segment<VectorHull> &s1,
+                              const lpma::Segment<T2> &s2) {
     if (s0.first != s1.first || s0.first != s2.first || s0.last != s1.last || s0.last != s2.last ||
         s0.slots != s1.slots || s0.slots != s2.slots)
         return "the hulls give different segments";

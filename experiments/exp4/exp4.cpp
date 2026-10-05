@@ -227,8 +227,8 @@ void usage(const char *program) {
               << "  --out DIR     directory holding the runs (default " << DEFAULT_OUT << "); the CSVs go to\n"
               << "                DIR/<run>, run = 1, 2, ... the next unused number\n"
               << "  --deltas D,D,...  the deltas, multiples of 0.5 (default " << DEFAULT_DELTAS << ")\n"
-              << "  --hull H      what each segment keeps to test joins: scan (T0), vector (T1, the\n"
-              << "                default) or tree (T2); the same segments with each, only the time differs\n"
+              << "  --hull H      what each segment keeps to test joins: scan (T0), vector (T1) or\n"
+              << "                tree (T2, the default); the same segments with each, only the time differs\n"
               << "  --validate    check the index at every prefix against exp3's PMA and O'Rourke;\n"
               << "                writes no files\n"
               << "  --permutation P  the insertion order of 1..n, as exp1 (default uniform):\n"
@@ -322,7 +322,7 @@ std::string inserts_json(const std::vector<DeltaRun> &runs) {
 
 int main(int argc, char **argv) {
     std::string sizes_argument = DEFAULT_NS, out_dir = DEFAULT_OUT, deltas_argument = DEFAULT_DELTAS;
-    std::string hull = "vector";
+    std::string hull = "tree";
     int threads = omp_get_num_procs();
     bool validate_only = false, has_seed = false;
     uint64_t seed = 0;
@@ -406,7 +406,9 @@ int main(int argc, char **argv) {
         json += inserts.empty() ? "}" : "\n  }";
         meta.extra = {{"structure", json_string(structure)},
                       {"pma", pma_json()},
-                      {"hull", json_string(hull == "scan" ? "ScanHull" : hull == "tree" ? "TreeHull" : "VectorHull")},
+                      {"hull", json_string(hull == "scan"   ? "ScanHull"
+                                           : hull == "tree" ? "TreeHull<" + std::to_string(lpma::TreeHull::LEAF_SIZE) + ">"
+                                                            : "VectorHull")},
                       {"inserts", json}};
     };
     set_extra();
