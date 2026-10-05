@@ -185,22 +185,38 @@ function renderRunMeta(run) {
     runMetaLine.classList.add("incomplete");
     row("status", "run " + meta.status + ", not complete - its results may be partial");
   }
+  // The PMA workload (tests/pma) runs several orders at one n and has no
+  // search, so no tiebreaker; its meta.json lists the orders instead.
+  const workload = Array.isArray(meta.orders);
   if (meta.seed !== undefined && meta.seed !== null) {
-    row("seed", code(String(meta.seed)), aside("each n uses seed + n"));
+    row("seed", code(String(meta.seed)), workload ? null : aside("each n uses seed + n"));
+  }
+  if (workload) {
+    if (meta.n) row("n", Number(meta.n).toLocaleString("en-US") + " keys per order");
+    const orders = row("orders");
+    meta.orders.forEach((order, i) => orders.append(i ? ", " : "", code(order)));
+  }
+  if (meta.pma) {
+    const pma = meta.pma;
+    row("pma", "leaf " + pma.leaf_upper + ", root " + pma.root_upper +
+        (pma.growth ? ", " + pma.growth + " growth" : "") +
+        (pma.initial_capacity ? ", presized to " + Number(pma.initial_capacity).toLocaleString("en-US") : ""));
   }
   if (meta.permutation) {
     row("permutation", code(meta.permutation), aside(describePermutation(meta.permutation)));
   }
   if (meta.structure) row("structure", meta.structure);
   if (meta.cost) row("cost", pretty(meta.cost));
-  // Runs from before --tiebreaker have no field: they broke ties the mindelta
-  // way, which the backfill wrote into their meta.json, so the fallback is only
-  // for a file that somehow still lacks it - not today's minlambda default.
-  const tiebreaker = meta.tiebreaker || "mindelta";
-  row("tiebreaker", code(tiebreaker),
-      aside((tiebreaker === "minlambda" ? "on equal qc, the fewest segments (largest δ)"
-                                        : "on equal qc, the smallest δ") +
-            (meta.tiebreaker ? "" : "; not in meta.json, what runs before the option did")));
+  if (!workload) {
+    // Runs from before --tiebreaker have no field: they broke ties the mindelta
+    // way, which the backfill wrote into their meta.json, so the fallback is only
+    // for a file that somehow still lacks it - not today's minlambda default.
+    const tiebreaker = meta.tiebreaker || "mindelta";
+    row("tiebreaker", code(tiebreaker),
+        aside((tiebreaker === "minlambda" ? "on equal qc, the fewest segments (largest δ)"
+                                          : "on equal qc, the smallest δ") +
+              (meta.tiebreaker ? "" : "; not in meta.json, what runs before the option did")));
+  }
   const time = runTime(meta);
   if (time) row("time", time);
   if (meta.commit) {
@@ -259,7 +275,7 @@ function render() {
     writeHash(run, null);
     message(
       "No figures for run " + run + ". Generate them with:",
-      "python3 experiments/" + name + "/plot_" + name + ".py --only=" + run
+      (data.plot || "python3 experiments/" + name + "/plot_" + name + ".py") + " --only=" + run
     );
     return;
   }

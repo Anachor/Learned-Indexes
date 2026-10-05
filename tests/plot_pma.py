@@ -2,7 +2,8 @@
 against the number of keys inserted, one line per insertion order.
 
 A run is results/pma/<run>/ - the CSVs and meta.json ./tests/pma wrote; its
-figure goes to figures/pma/<run>/workload.png. Which runs, as for the
+figures go to figures/pma/<run>/overall/: capacity.png, density.png, moves.png
+and time.png, the order the results server shows them in. Which runs, as for the
 experiments: --new (default) the runs with no figure or with CSVs newer than
 it, skipping unfinished ones; --latest; --all; --only=2,3.
 
@@ -70,54 +71,79 @@ def plot(run, results, figures):
     pma = runs.meta_of(results).get("pma", {})
     leaf, root = pma.get("leaf_upper", 1.0), pma.get("root_upper", 0.75)
 
-    fig, axes = plt.subplots(4, 1, figsize=(8, 11), sharex=True)
-    capacity, density, moves, time = axes
+    growth = pma.get("growth", "lazy") + " growth"
+    if pma.get("initial_capacity"):
+        growth += f", presized to {pma['initial_capacity']:,}"
+    subtitle = f"run {run} (leaf {leaf:g}, root {root:g}, {growth})"
+    top = max(f["n"].max() for f in data.values())
+    out = Path(figures) / "overall"
+    out.mkdir(parents=True, exist_ok=True)
+    # the single figure earlier versions wrote, which the four replace
+    (Path(figures) / "workload.png").unlink(missing_ok=True)
 
-    for frame, color in ((data[o], colors[o]) for o in names):
-        order = frame["order"].iloc[0]
-        full = frame.dropna(subset=["moves"])
-        # capacity steps up at each grow; the pre-grow rows make the steps and
-        # the density sawtooth sharp
-        capacity.step(frame["n"].to_numpy(), frame["capacity"].to_numpy(), where="post", lw=2, color=color,
-                      label=order)
-        density.plot(frame["n"].to_numpy(), frame["density"].to_numpy(), lw=1.5, color=color, label=order)
-        moves.plot(full["n"].to_numpy(), full["moves_per_insert"].to_numpy(), lw=2, color=color, label=order)
-        time.plot(full["n"].to_numpy(), full["ns_per_insert"].to_numpy(), lw=2, color=color, label=order)
-        last = full.iloc[-1]
-        for axis, column in ((moves, "moves_per_insert"), (time, "ns_per_insert")):
-            axis.annotate(order, (last["n"], last[column]), xytext=(6, 0), textcoords="offset points",
+    def figure(title, ylabel, draw):
+        fig, axis = plt.subplots(figsize=(8, 4.5))
+        for o in names:
+            draw(axis, data[o], colors[o], o)
+        log2(axis.set_xscale, "x")
+        axis.set_xlabel("keys inserted (n)")
+        axis.set_ylabel(ylabel)
+        style(axis)
+        axis.set_title(f"PMA {title}, {subtitle}", loc="left", color=INK, fontsize=11)
+        return fig, axis
+
+    def save(fig, name):
+        fig.tight_layout()
+        path = out / f"{name}.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"wrote {path}")
+
+    def label_ends(axis, column):
+        for o in names:
+            last = data[o].dropna(subset=["moves"]).iloc[-1]
+            axis.annotate(o, (last["n"], last[column]), xytext=(6, 0), textcoords="offset points",
                           va="center", fontsize=9, color=INK)
 
-    n = np.logspace(0, np.log2(max(f["n"].max() for f in data.values())), 200, base=2)
-    moves.plot(n, np.log2(np.maximum(n, 2)) ** 2, lw=1, ls="--", color=MUTED, label="log₂²n")
-    moves.annotate("log₂²n", (n[-1], np.log2(n[-1]) ** 2), xytext=(6, 0), textcoords="offset points",
-                   va="center", fontsize=9, color=MUTED)
+    # capacity steps up at each grow; the pre-grow rows make the steps and the
+    # density sawtooth sharp
+    fig, axis = figure("capacity", "capacity (slots)",
+                       lambda a, f, c, o: a.step(f["n"].to_numpy(), f["capacity"].to_numpy(), where="post",
+                                                 lw=2, color=c, label=o))
+    log2(axis.set_yscale, "y")
+    axis.legend(frameon=False, loc="upper left", title="insertion order")
+    save(fig, "capacity")
 
-    log2(capacity.set_yscale, "y")
-    capacity.set_ylabel("capacity (slots)")
-    density.set_ylabel("density (keys / slots)")
-    density.axhline(root, lw=1, ls="--", color=MUTED)
-    density.annotate(f"root bound {root:g}", (1, root), xytext=(4, 4), textcoords="offset points",
-                     fontsize=9, color=MUTED)
-    density.set_ylim(0, 1.02)
-    moves.set_yscale("log")
-    moves.set_ylabel("keys moved per insert\n(amortized)")
-    time.set_yscale("log")
-    time.set_ylabel("ns per insert\n(amortized)")
-    log2(time.set_xscale, "x")
-    time.set_xlabel("keys inserted (n)")
+    fig, axis = figure("density", "density (keys / slots)",
+                       lambda a, f, c, o: a.plot(f["n"].to_numpy(), f["density"].to_numpy(), lw=1.5, color=c,
+                                                 label=o))
+    axis.axhline(root, lw=1, ls="--", color=MUTED)
+    axis.annotate(f"root bound {root:g}", (1, root), xytext=(4, 4), textcoords="offset points",
+                  fontsize=9, color=MUTED)
+    axis.set_ylim(0, 1.02)
+    axis.legend(frameon=False, loc="upper left", title="insertion order")
+    save(fig, "density")
 
-    for axis in axes:
-        style(axis)
-    capacity.legend(frameon=False, loc="upper left", title="insertion order")
-    capacity.set_title(f"PMA insertion workload, run {run} (leaf {leaf:g}, root {root:g}, lazy growth)",
-                       loc="left", color=INK)
-    fig.tight_layout()
-    out = Path(figures) / "workload.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"wrote {out}")
+    def amortized(column):
+        def draw(a, f, c, o):
+            full = f.dropna(subset=["moves"])
+            a.plot(full["n"].to_numpy(), full[column].to_numpy(), lw=2, color=c, label=o)
+        return draw
+
+    fig, axis = figure("keys moved per insert", "keys moved per insert (amortized)",
+                       amortized("moves_per_insert"))
+    n = np.logspace(0, np.log2(top), 200, base=2)
+    axis.plot(n, np.log2(np.maximum(n, 2)) ** 2, lw=1, ls="--", color=MUTED)
+    axis.annotate("log₂²n", (n[-1], np.log2(n[-1]) ** 2), xytext=(6, 0), textcoords="offset points",
+                  va="center", fontsize=9, color=MUTED)
+    axis.set_yscale("log")
+    label_ends(axis, "moves_per_insert")
+    save(fig, "moves")
+
+    fig, axis = figure("time per insert", "ns per insert (amortized)", amortized("ns_per_insert"))
+    axis.set_yscale("log")
+    label_ends(axis, "ns_per_insert")
+    save(fig, "time")
 
 
 def main():

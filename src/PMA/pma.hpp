@@ -28,6 +28,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "packed_memory_array.hpp"
+
 struct PMAParams {
     double leaf_upper = 1.0;       // max density of a leaf
     double root_upper = 0.75;      // max density of the whole array
@@ -35,26 +37,25 @@ struct PMAParams {
 };
 
 template <PMAParams P = PMAParams{}>
-class PMA {
+class PMA : public PackedMemoryArray {
     static_assert(0 < P.root_upper && P.root_upper <= P.leaf_upper && P.leaf_upper <= 1);
     static_assert(P.initial_capacity >= 2 && std::has_single_bit(P.initial_capacity));
 
 public:
-    // Keys written into slots: one for an insert that fits its leaf plus each
-    // key it shifts, every key of the window for a rebalance or a grow.
-    struct Stats {
-        uint64_t moves = 0, rebalances = 0, grows = 0;
-    };
-
     PMA() { resize(P.initial_capacity); }
 
     // Inserts key; false if it is already there.
-    bool insert(int64_t key) {
+    bool insert(int64_t key, Update *update = nullptr) override {
+        if (update) {
+            *update = {};
+            update->old_capacity = update->new_capacity = capacity();
+        }
         size_t p = find_le(key);
         if (p != NONE && keys_[p] == key) return false;
         size_t leaf = p == NONE ? 0 : p / leaf_size_;
 
         if (fits(count_[leaf] + 1, 0, leaf_size_)) {
+            if (update) describe_update(*update, leaf * leaf_size_, leaf_size_, key);
             insert_in_leaf(leaf, p, key);
         } else {
             size_t count = count_[leaf];
@@ -67,29 +68,40 @@ public:
             }
             if (h <= height_) {
                 size_t first = leaf >> h << h;
+                if (update) describe_update(*update, first * leaf_size_, leaf_size_ << h, key);
                 rebalance(first * leaf_size_, leaf_size_ << h, key);
             } else {
+                if (update) describe_update(*update, 0, capacity(), key);
                 grow(key);
+                if (update) update->new_slots = {0, capacity()};
             }
         }
         ++size_;
+        if (update) {
+            update->inserted = true;
+            update->new_capacity = capacity();
+        }
         return true;
     }
 
-    size_t size() const { return size_; }
-    size_t capacity() const { return keys_.size(); }
+    size_t size() const override { return size_; }
+    size_t capacity() const override { return keys_.size(); }
     size_t leaf_size() const { return leaf_size_; }
-    const Stats &stats() const { return stats_; }
+    const Stats &stats() const override { return stats_; }
 
     // The array itself: slot i is empty or holds a key, keys increasing.
-    bool occupied(size_t slot) const { return used_[slot]; }
-    int64_t key_at(size_t slot) const { return keys_[slot]; }
+    bool occupied(size_t slot) const override { return used_[slot]; }
+    int64_t key_at(size_t slot) const override { return keys_[slot]; }
 
-    // The keys in order and their slots. Clears both first.
-    void points(std::vector<int64_t> &keys, std::vector<int64_t> &slots) const {
+    using PackedMemoryArray::points;
+
+    // The keys of a physical range in order, with absolute slots.
+    void points(std::vector<int64_t> &keys, std::vector<int64_t> &slots,
+                SlotRange range) const override {
+        check_range(range);
         keys.clear();
         slots.clear();
-        for (size_t i = 0; i < keys_.size(); ++i) {
+        for (size_t i = range.begin; i < range.end; ++i) {
             if (!used_[i]) continue;
             keys.push_back(keys_[i]);
             slots.push_back(int64_t(i));
@@ -99,7 +111,7 @@ public:
     // Checks the invariants: keys increasing, the leaf counts and size match the
     // slots, no leaf over leaf_upper (rounded up, as a spread can leave it), and
     // the capacity and leaf size follow the rules.
-    bool check() const {
+    bool check() const override {
         size_t n = keys_.size();
         if (!std::has_single_bit(n) || leaf_size_ != leaf_size_for(n)) return false;
         if (count_.size() != n / leaf_size_) return false;
@@ -132,6 +144,20 @@ private:
     size_t height_ = 0;  // H, the root's height
     Stats stats_;
     std::vector<int64_t> buffer_;  // a window's keys during a rebalance
+
+    // Capture key boundaries before overwriting slots. Reporting an entire
+    // leaf for a local shift avoids coupling clients to the shifting policy.
+    // This scan is skipped when the caller does not request a report.
+    void describe_update(Update &update, size_t begin, size_t slots, int64_t key) const {
+        update.old_slots = update.new_slots = {begin, begin + slots};
+        KeyRange keys{key, key};
+        for (size_t i = begin; i < begin + slots; ++i) {
+            if (!used_[i]) continue;
+            keys.first = std::min(keys.first, keys_[i]);
+            keys.last = std::max(keys.last, keys_[i]);
+        }
+        update.affected_keys = keys;
+    }
 
     // The smallest power of two >= log2(capacity), at most the capacity.
     static size_t leaf_size_for(size_t capacity) {

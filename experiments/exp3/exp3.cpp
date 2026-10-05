@@ -112,7 +112,8 @@ NResult run_n(size_t n, uint64_t seed, Progress &progress) {
         size_t threads = size_t(omp_get_num_threads());
         size_t id = size_t(omp_get_thread_num());
         PgmORourke<int64_t> orourke(1);
-        Pma pma;
+        Pma storage;
+        PackedMemoryArray &pma = storage;
         std::vector<int64_t> keys, slots;
         keys.reserve(n);
         slots.reserve(n);
@@ -157,7 +158,8 @@ bool validate(size_t n, uint64_t seed) {
 
     PgmORourke<int64_t> pgm(1);
     BruteORourke<int64_t> brute(1);
-    Pma pma;
+    Pma storage;
+    PackedMemoryArray &pma = storage;
     std::vector<int64_t> sorted, keys, slots;
     for (size_t i = 0; i < n; ++i) {
         int64_t key = permutation[i];

@@ -314,6 +314,16 @@ def summary(root):
     return listing
 
 
+def plot_command(root, experiment):
+    """The command that plots a run: experiments/<exp>/plot_<exp>.py, or
+    tests/plot_<exp>.py for what lives under tests/ (the PMA)."""
+    for directory in (os.path.join("experiments", experiment), "tests"):
+        script = os.path.join(directory, f"plot_{experiment}.py")
+        if os.path.isfile(os.path.join(root, script)):
+            return f"python3 {script}"
+    return f"python3 experiments/{experiment}/plot_{experiment}.py"
+
+
 def detail(root, experiment):
     """The experiment payload: every run's figures and CSVs, in one response.
 
@@ -326,6 +336,7 @@ def detail(root, experiment):
         "label": label(experiment),
         "runs": numbers,
         "simulate": binary(root, experiment) is not None,
+        "plot": plot_command(root, experiment),
         "meta": {str(run): metadata(root, experiment, run) for run in numbers},
         "figures": {str(run): {str(n): images
                                for n, images in figures(root, experiment, run).items()}

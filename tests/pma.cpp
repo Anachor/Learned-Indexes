@@ -59,7 +59,8 @@ constexpr PMAParams PARAMS{.leaf_upper = PMA_LEAF_UPPER, .root_upper = PMA_ROOT_
 // first mismatch, with what went wrong on stderr.
 template <class Pma>
 bool stress_case(const std::vector<int64_t> &keys, const std::string &desc) {
-    Pma pma;
+    Pma storage;
+    PackedMemoryArray &pma = storage;
     std::set<int64_t> expected;
     std::vector<int64_t> got, slots;
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -141,14 +142,15 @@ int workload(size_t n, const std::string &order, uint64_t seed, const std::files
         return 2;
     }
 
-    PMA<PARAMS> pma;
+    PMA<PARAMS> storage;
+    PackedMemoryArray &pma = storage;
     std::fprintf(f, "order,n,capacity,leaf_size,density,moves,moves_per_insert,ns_per_insert,rebalances,grows\n");
     auto row = [&](double ns) {
         auto &s = pma.stats();
         size_t m = pma.size();
         // order quoted: zipf:16,1 has a comma
         std::fprintf(f, "\"%s\",%zu,%zu,%zu,%.6f,%llu,%.4f,%.2f,%llu,%llu\n", order.c_str(), m, pma.capacity(),
-                     pma.leaf_size(), double(m) / double(pma.capacity()), (unsigned long long)s.moves,
+                     storage.leaf_size(), double(m) / double(pma.capacity()), (unsigned long long)s.moves,
                      double(s.moves) / double(m), ns / double(m), (unsigned long long)s.rebalances,
                      (unsigned long long)s.grows);
     };
