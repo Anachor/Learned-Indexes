@@ -74,7 +74,7 @@ private:
 }  // namespace
 
 indexInterface<uint64_t, uint64_t> *make_gpla_index(const std::string &name) {
-    std::string hull = "tree", delta = "32", leaf;
+    std::string hull = "tree", delta = "16", leaf;
     std::stringstream parts(name);
     std::string part;
     if (!std::getline(parts, part, '-') || part != "gpla") return nullptr;

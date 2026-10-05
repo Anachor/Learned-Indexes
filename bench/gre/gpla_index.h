@@ -1,7 +1,7 @@
 #pragma once
 
 // The GPLA (src/GPLA) as a GRE index (third_party/GRE), named gpla -
-// the tree hull with 32-point leaves, delta = 32 - with any of these after it:
+// the tree hull with 32-point leaves, delta = 16 - with any of these after it:
 //
 //   -delta8          delta = 8 (any multiple of 0.5)
 //   -vector, -scan   another hull (-tree is the default)
