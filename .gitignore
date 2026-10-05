@@ -10,7 +10,8 @@ __pycache__/
 experiments/exp3/exp3
 experiments/exp4/exp4
 tests/pma
-tests/pma_resized
+tests/pma_presized
+tests/pma_api
 tests/gpla
 tests/fitter
 tests/hulls
