@@ -216,6 +216,47 @@ same keys packed - is the comparison.
     ./experiments/exp3/exp3 --validate -n 512 [seed]
     ```
 
+## Experiment 4
+
+Our dynamic structure, the learned PMA (`src/LPMA/`): the keys are inserted into it
+one at a time, once for each delta of a grid (`--deltas`, default 0.5, 1, 2, ..., 1024),
+each keeping its delta throughout, and after every insert its number of segments
+lambda gives the query complexity `log2(delta) + log2(lambda)`. Its PMA is exp3's, and
+the seeds, `--permutation` orders and `--tiebreaker` are exp1's, so the same seed and
+order give exp3's layouts: exp3's static O'Rourke on the same points is the
+comparison (lambda is at most 2 * that optimum - 1, at the same delta). `--hull scan`
+or `vector` (default) only changes the time.
+
+- **Run**: writes one CSV per n to `results/exp4/<run>/`, a row per delta and prefix
+  (`seed,n,t,capacity,k,L,cost,best`, best = the grid's lowest query complexity at t),
+  and `meta.json` as exp3, with the hull and, per n and delta, the inserts' time and
+  work (`inserts`).
+
+    ```
+    experiments/exp4/build.sh           # C++20
+    ./experiments/exp4/exp4 [-n N,N,...] [-j THREADS] [--out DIR] [--deltas D,D,...] [--hull H] [--permutation P] [--tiebreaker T] [seed]
+    ```
+
+- **Plot**: per n, `query_complexity.png` (each delta, the grid's best, and exp3's
+  static best over the grid and over every delta), `segments.png`, `optimality.png`
+  (lambda over exp3's optimum at the same delta) and `best_delta.png`; across n,
+  `overall/query_complexity.png`, `delta_qc.png` (each delta's average),
+  `optimality.png`, `best_delta.png`, `overhead.png` and `insert_time.png`. The
+  comparisons need an exp3 run in `--exp3-results` with the same seed, permutation
+  and PMA. Same run modes as exp1.
+
+    ```
+    python3 experiments/exp4/plot_exp4.py [--new | --latest | --all | --only=RUNS] [--exp3-results DIR]
+    ```
+
+- **Validate** (small n, writes nothing): at every prefix and delta, both hulls' indexes
+  pass their checks and agree, hold exp3's layout, have at most 2 * optimal - 1
+  segments by exp3's O'Rourke, and answer `lower_bound` right for every key.
+
+    ```
+    ./experiments/exp4/exp4 --validate -n 512 [seed]
+    ```
+
 ## Results server
 
 Browses the figures already in `figures/`: the homepage lists the experiments, and

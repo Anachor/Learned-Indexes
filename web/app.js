@@ -206,6 +206,15 @@ function renderRunMeta(run) {
     row("permutation", code(meta.permutation), aside(describePermutation(meta.permutation)));
   }
   if (meta.structure) row("structure", meta.structure);
+  // The learned PMA (exp4): what each segment keeps to test joins.
+  if (meta.hull) {
+    row("hull", code(meta.hull),
+        aside(meta.hull === "ScanHull" ? "a join reads every point of both segments"
+                                       : "a join reads only the segments' hull vertices"));
+  }
+  if (Array.isArray(meta.fixed_deltas) && meta.fixed_deltas.length) {
+    row("fixed δ", meta.fixed_deltas.join(", "));
+  }
   if (meta.cost) row("cost", pretty(meta.cost));
   if (!workload) {
     // Runs from before --tiebreaker have no field: they broke ties the mindelta

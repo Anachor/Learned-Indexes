@@ -8,6 +8,7 @@ figures/
 .claude/
 __pycache__/
 experiments/exp3/exp3
+experiments/exp4/exp4
 tests/pma
 tests/pma_resized
 tests/lpma

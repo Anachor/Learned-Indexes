@@ -76,6 +76,7 @@ struct RunMeta {
     int run = 0;
     uint64_t seed = 0;
     std::vector<size_t> sizes;
+    std::vector<int64_t> fixed_k = FIXED_K;  // written as fixed_deltas, delta = k/2
     // Experiment-specific fields, written after cost: (key, JSON value).
     std::vector<std::pair<std::string, std::string>> extra;
     struct Timing { size_t n; double seconds, mean_evaluations; size_t max_evaluations; };
@@ -93,7 +94,7 @@ struct RunMeta {
           << "  \"ns\": [";
         for (size_t i = 0; i < sizes.size(); ++i) o << (i ? ", " : "") << sizes[i];
         o << "],\n  \"fixed_deltas\": [";
-        for (size_t i = 0; i < FIXED_K.size(); ++i) o << (i ? ", " : "") << double(FIXED_K[i]) / 2;
+        for (size_t i = 0; i < fixed_k.size(); ++i) o << (i ? ", " : "") << double(fixed_k[i]) / 2;
         o << "],\n"
           << "  \"cost\": " << json_string(cost) << ",\n"
           << "  \"tiebreaker\": " << json_string(tiebreaker_name()) << ",\n";
