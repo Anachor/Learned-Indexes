@@ -1,3 +1,6 @@
 [submodule "third_party/PGM-index"]
 	path = third_party/PGM-index
 	url = https://github.com/gvinciguerra/PGM-index
+[submodule "third_party/GRE"]
+	path = third_party/GRE
+	url = https://github.com/gre4index/GRE
