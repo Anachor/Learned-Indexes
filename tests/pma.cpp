@@ -18,7 +18,7 @@
 //
 //   ./tests/pma --stress [-i iterations] [-n MAXN] [seed]
 //
-//   g++-11 -std=c++20 -O2 tests/pma.cpp -o tests/pma
+//   g++-11 -std=c++20 -O3 tests/pma.cpp -o tests/pma
 //
 // The PMA's parameters are compile time, so inserts stay as fast as with the
 // defaults: pick them with -DPMA_LEAF_UPPER=0.9 -DPMA_ROOT_UPPER=0.5

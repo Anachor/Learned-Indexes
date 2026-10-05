@@ -31,20 +31,20 @@ git submodule update --init
 
 - **Stress test**: compares PGM and ZLW implementations with a brute-force implementation on random cases. 0 mismatches so far (y = ranks only).
     ```
-    g++-11 -std=c++17 -O2 tests/orourke.cpp -o tests/orourke
+    g++-11 -std=c++17 -O3 tests/orourke.cpp -o tests/orourke
     ./tests/orourke [-v | -vv] [-i iterations] [-n MAXN] [-d MAXD] [seed]
     ```
 
 - **Speed comparison**: Measure the speed of PGM and ZLW implementations on random cases. takes a method (PGM or ZLW), number of test cases, and maximum n as arguments. Optional: delta and seed.
 
     ```
-    g++-11 -std=c++17 -O2 tests/orourke_speed.cpp -o tests/orourke_speed
+    g++-11 -std=c++17 -O3 tests/orourke_speed.cpp -o tests/orourke_speed
     ./tests/orourke_speed -m METHOD -t T -n N [-d DELTA] [seed]
     ```
 
 - **PMA** (`src/PMA/pma.hpp`, C++20): by default `tests/pma` runs the insertion workload: 2^20 keys (`-n`) for each order (`--orders`, default `uniform,zipf:16,1,sorted,reverse`), each run in a new folder `results/pma/<run>/` (`<order>.csv` and `meta.json`). The plot script writes four figures to `figures/pma/<run>/overall/` - `capacity.png`, `density.png`, `moves.png` and `time.png` (keys moved and ns per insert, amortized), each against n - which the results server shows under the run, with the same run modes as exp1. `--stress` checks random insert sequences against a `std::set` and the invariants after every insert, writing nothing.
     ```
-    g++-11 -std=c++20 -O2 -DGIT_COMMIT="\"$(git rev-parse --short HEAD)\"" tests/pma.cpp -o tests/pma
+    g++-11 -std=c++20 -O3 -DGIT_COMMIT="\"$(git rev-parse --short HEAD)\"" tests/pma.cpp -o tests/pma
     ./tests/pma [-n N] [--orders O,O,...] [--out DIR] [seed]
     ./tests/pma --stress [-i iterations] [-n MAXN] [seed]
     python3 tests/plot_pma.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
@@ -57,10 +57,10 @@ git submodule update --init
   structure from all three, and `lower_bound`/`contains` against a `std::set`. `tests/gpla_speed` times inserts and
   lookups with each hull (the median of `-r` repeats).
     ```
-    g++-11 -std=c++20 -O2 tests/fitter.cpp -o tests/fitter && ./tests/fitter
-    g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls && ./tests/hulls
-    g++-11 -std=c++20 -O2 tests/gpla.cpp -o tests/gpla && ./tests/gpla
-    g++-11 -std=c++20 -O2 tests/gpla_speed.cpp -o tests/gpla_speed
+    g++-11 -std=c++20 -O3 tests/fitter.cpp -o tests/fitter && ./tests/fitter
+    g++-11 -std=c++20 -O3 tests/hulls.cpp -o tests/hulls && ./tests/hulls
+    g++-11 -std=c++20 -O3 tests/gpla.cpp -o tests/gpla && ./tests/gpla
+    g++-11 -std=c++20 -O3 tests/gpla_speed.cpp -o tests/gpla_speed
     ./tests/gpla_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls scan,vector,tree,tree1,...,tree128] [-q Q] [-r R] [--csv FILE]
     ```
 

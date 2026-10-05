@@ -1,7 +1,7 @@
 // O'Rourke (gpla::Fitter), which everything else relies on, against
 // BruteORourke on random points, and fraction_less against products.
 //
-//   g++-11 -std=c++20 -O2 tests/fitter.cpp -o tests/fitter
+//   g++-11 -std=c++20 -O3 tests/fitter.cpp -o tests/fitter
 //   ./tests/fitter [-i iterations] [-n MAXN] [seed]
 
 #include "gpla_common.hpp"

@@ -8,7 +8,7 @@
 // hull edges at one slope: joins against brute force and O'Rourke's line,
 // splits, every tree node and leaf checked.
 //
-//   g++-11 -std=c++20 -O2 tests/hulls.cpp -o tests/hulls
+//   g++-11 -std=c++20 -O3 tests/hulls.cpp -o tests/hulls
 //   ./tests/hulls [-i iterations] [-n MAXN] [seed]
 
 #include "gpla_common.hpp"

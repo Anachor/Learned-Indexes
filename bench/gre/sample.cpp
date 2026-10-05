@@ -6,7 +6,7 @@
 // A key file is binary: the key count, then the keys, all uint64. A file
 // shorter than its count says (a download cut short) is read as far as it goes.
 //
-//   g++-11 -std=c++20 -O2 bench/gre/sample.cpp -o bench/gre/sample
+//   g++-11 -std=c++20 -O3 bench/gre/sample.cpp -o bench/gre/sample
 //   ./bench/gre/sample IN OUT M
 
 #include <algorithm>

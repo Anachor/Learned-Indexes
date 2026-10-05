@@ -8,7 +8,7 @@
 // checks that no two neighbours can be joined and at most 2 * optimal - 1
 // segments.
 //
-//   g++-11 -std=c++20 -O2 tests/gpla.cpp -o tests/gpla
+//   g++-11 -std=c++20 -O3 tests/gpla.cpp -o tests/gpla
 //   ./tests/gpla [-i iterations] [-n MAXN] [seed]
 
 #include <iterator>

@@ -25,7 +25,7 @@ else
     DIRTY=false
 fi
 
-"$CXX" -std=c++17 -O2 -fopenmp \
+"$CXX" -std=c++17 -O3 -fopenmp \
     -DGIT_COMMIT="\"$COMMIT\"" -DGIT_DIRTY="\"$DIRTY\"" \
     experiments/exp1/exp1.cpp -o experiments/exp1/exp1
 

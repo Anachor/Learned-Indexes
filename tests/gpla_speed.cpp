@@ -16,7 +16,7 @@
 // the line's 2*delta + 1 slots, ~log2 delta + 1). The PMA's own search, used by
 // inserts, is not counted.
 //
-//   g++-11 -std=c++20 -O2 tests/gpla_speed.cpp -o tests/gpla_speed
+//   g++-11 -std=c++20 -O3 tests/gpla_speed.cpp -o tests/gpla_speed
 //   ./tests/gpla_speed [-n N,N,...] [--orders O,...] [--deltas D,...] [--hulls H,...] [-q Q] [-r R] [--csv FILE] [seed]
 //
 // Orders: sorted, reverse, or an experiments --permutation (uniform, zipf:16,1, ...).

@@ -21,6 +21,6 @@ if ! git -C "$GRE" apply --reverse --check "$HERE/gre.patch" 2>/dev/null; then
 fi
 cmake -S "$GRE" -B "$GRE/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" >/dev/null
 cmake --build "$GRE/build" -j "$(nproc)"
-"$CXX" -std=c++20 -O2 "$HERE/sample.cpp" -o "$HERE/sample"
+"$CXX" -std=c++20 -O3 "$HERE/sample.cpp" -o "$HERE/sample"
 
 echo "built third_party/GRE/build/microbench and bench/gre/sample ($("$CXX" --version | head -1))"
