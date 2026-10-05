@@ -10,4 +10,5 @@ __pycache__/
 experiments/exp3/exp3
 tests/pma
 tests/pma_resized
+tests/lpma
 

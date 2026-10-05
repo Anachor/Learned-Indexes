@@ -7,6 +7,9 @@ Code and experiments for *GPLA: Robust and Dynamic Piecewise Linear Approximatio
 - `notes/`: paper draft, experiment plan (`Notes.txt`), progress log (`workflow.md`)
 - `src/ORourke/`: O'Rourke interface (`orourke.hpp`) and implementations: PGM, ZLW, brute force
 - `src/PMA/`: the packed memory array (`pma.hpp`, C++20)
+- `src/LPMA/`: the learned PMA (`learned_pma.hpp`, C++20): segments of keys in a PMA, each with a line within delta of their slots,
+  kept so that no two neighbours can be joined (at most 2 * optimal - 1 segments). `geometry.hpp` is the exact O'Rourke,
+  `hull.hpp` what a segment keeps to test joins (`ScanHull`: nothing; `VectorHull`: its hull chains), `segment.hpp` a segment
 - `tests/`: stress tests and speed comparison of the implementations
 - `experiments/`: the experiments, writing CSVs to `results/` and plots to `figures/`;
   `experiments/common/` holds what they share (permutations, the best-delta search, run folders and `meta.json`)
@@ -42,6 +45,15 @@ git submodule update --init
     ./tests/pma [-n N] [--orders O,O,...] [--out DIR] [seed]
     ./tests/pma --stress [-i iterations] [-n MAXN] [seed]
     python3 tests/plot_pma.py [--new | --latest | --all | --only=RUNS] [--results DIR] [--figures DIR]
+    ```
+
+- **Learned PMA** (`src/LPMA/`, C++20): checks the exact O'Rourke against the brute force, segment joins and splits
+  against brute force and building from scratch, and `LearnedPMA<ScanHull>` and `LearnedPMA<VectorHull>` side by side
+  on random insert sequences over three PMAs: after every insert the segments, their lines, no joinable neighbours,
+  at most 2 * optimal - 1 segments, and `lower_bound`/`contains` against a `std::set`. Writes nothing.
+    ```
+    g++-11 -std=c++20 -O2 tests/lpma.cpp -o tests/lpma
+    ./tests/lpma [-i iterations] [-n MAXN] [seed]
     ```
 
 ## Experiment 1
