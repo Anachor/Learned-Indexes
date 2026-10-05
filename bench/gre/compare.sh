@@ -6,14 +6,17 @@
 #   balanced    bulk load half, then n operations: half lookups, half inserts
 #   write-only  bulk load half, then insert the other half
 #
-#   bench/gre/compare.sh DATASET [-n N] [-o CSV] [INDEX ...]
+#   bench/gre/compare.sh DATASET[,DATASET...] [-n N] [-o CSV] [INDEX ...]
 #
-# DATASET is one of GRE's (covid, genome, osm, books, fb, ...), downloaded to
-# third_party/GRE/resources/ if missing and resumed if cut short, or a key
-# file. -n N takes N of its keys, evenly spaced by rank (default 1M; 100k, 5M
-# or a number work too; "all" for every key). Each run adds a row to CSV
-# (default results/gre/<dataset>_<n>.csv); then a table of throughputs and
-# memory. INDEX defaults to alex lipp pgm btree artunsync gpla; our variants
+# Each DATASET is a key file, or a name in third_party/GRE/resources/: GRE's
+# (covid, genome, osm, books, fb, ...) or the first 2M or so keys of some
+# (covid-short, genome-short, history-short, libio-short, planet-short,
+# wise-short). It never downloads: a dataset missing or cut short stops it
+# before any run, with the wget command that gets GRE's. -n N takes N of each
+# one's keys, evenly spaced by rank (default 1M; 100k, 5M or a number work too;
+# "all" for every key). Each run adds a row to CSV (default, one per dataset:
+# results/gre/<dataset>_<n>.csv); then a table of throughputs and memory per
+# dataset. INDEX defaults to alex lipp pgm btree artunsync gpla; our variants
 # are named as gpla-delta8, gpla-vector, gpla-leaf16 (bench/gre/gpla_index.h).
 #
 # Builds GRE and the sampler first (bench/gre/build.sh: quick when nothing
@@ -28,12 +31,12 @@ RESOURCES="$GRE/resources"
 DATASETS="covid libio genome osm books fb history planet stack wise wiki eth gnomad planetways rev"
 
 usage() {
-    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
 }
 
-[ $# -ge 1 ] || usage
-DATASET="$1"
+[ $# -ge 1 ] && [[ $1 != -h && $1 != --help ]] || usage
+IFS=, read -ra NAMES <<<"$1"
 shift
 N=1M
 CSV=""
@@ -61,57 +64,66 @@ fi
 # A key file's count (its first 8 bytes) and the keys it holds; GRE trusts the count.
 count() { python3 -c 'import struct, sys; print(struct.unpack("<Q", open(sys.argv[1], "rb").read(8))[0])' "$1"; }
 holds() { echo $((($(stat -c %s "$1") - 8) / 8)); }
-complete() { [ -f "$1" ] && [ "$(holds "$1")" -ge "$(count "$1")" ]; }
 
-if [ -f "$DATASET" ]; then
-    SOURCE="$DATASET"
-    NAME="$(basename "$DATASET")"
-else
-    NAME="$DATASET"
-    SOURCE="$RESOURCES/$NAME"
-    if ! complete "$SOURCE"; then
-        if [[ " $DATASETS " != *" $NAME "* ]]; then
-            echo "no key file $DATASET, and GRE has no dataset by that name ($DATASETS)" >&2
-            exit 2
-        fi
-        echo "downloading $NAME to $RESOURCES/ (about 1.6 GB; run again to resume if it stops)"
-        mkdir -p "$RESOURCES"
-        wget --no-check-certificate -c -q --show-progress -P "$RESOURCES" "https://www.cse.cuhk.edu.hk/mlsys/gre/$NAME"
+# For GRE's dataset $1, the command that downloads it (about 1.6 GB; -c resumes).
+get_hint() {
+    [[ " $DATASETS " == *" $1 "* ]] || return 0
+    echo "get it with: wget --no-check-certificate -c -P $RESOURCES https://www.cse.cuhk.edu.hk/mlsys/gre/$1" >&2
+}
+
+SOURCES=()
+for dataset in "${NAMES[@]}"; do
+    source="$dataset"
+    [ -f "$source" ] || source="$RESOURCES/$dataset"
+    if [ ! -f "$source" ]; then
+        echo "no key file $dataset, nor $source (GRE's datasets: $DATASETS)" >&2
+        get_hint "$dataset"
+        exit 2
     fi
-fi
-if ! complete "$SOURCE"; then
-    echo "$SOURCE says $(count "$SOURCE") keys but holds $(holds "$SOURCE"): cut short" >&2
-    exit 1
-fi
+    if [ "$(holds "$source")" -lt "$(count "$source")" ]; then
+        echo "$source says $(count "$source") keys but holds $(holds "$source"): cut short" >&2
+        get_hint "$dataset"
+        exit 1
+    fi
+    SOURCES+=("$source")
+done
 
 echo "building (log: $GRE/build.log)"
 "$HERE/build.sh" >"$GRE/build.log" 2>&1 || { tail -20 "$GRE/build.log"; exit 1; }
 
-KEYS="$SOURCE"
-if [ "$N" != all ] && [ "$N" -lt "$(count "$SOURCE")" ]; then
-    KEYS="${SOURCE}_$N"
-    [ "$KEYS" -nt "$SOURCE" ] || "$HERE/sample" "$SOURCE" "$KEYS" "$N"
-fi
-N="$(count "$KEYS")"
-CSV="${CSV:-$ROOT/results/gre/${NAME}_$N.csv}"
-mkdir -p "$(dirname "$CSV")"
-echo "$N keys from $SOURCE; rows to $CSV"
+# Every index under each workload on N keys of the key file $1, then its table.
+run_dataset() {
+    local source="$1" keys="$1" n csv start out index workload
+    if [ "$N" != all ] && [ "$N" -lt "$(count "$source")" ]; then
+        keys="${source}_$N"
+        [ "$keys" -nt "$source" ] || "$HERE/sample" "$source" "$keys" "$N"
+    fi
+    n="$(count "$keys")"
+    csv="${CSV:-$ROOT/results/gre/$(basename "$source")_$n.csv}"
+    mkdir -p "$(dirname "$csv")"
+    echo
+    echo "$n keys from $source; rows to $csv"
 
-for workload in "1 0 1 read-only" "0.5 0.5 0.5 balanced" "0 1 0.5 write-only"; do
-    set -- $workload  # read, insert, bulk-load fraction, name
-    for index in "${INDEXES[@]}"; do
-        printf '%-11s %-22s ' "$4" "$index"
-        start=$SECONDS
-        out="$("$GRE/build/microbench" --keys_file="$KEYS" --keys_file_type=binary --read="$1" --insert="$2" \
-            --init_table_ratio="$3" --operations_num="$N" --table_size=-1 --thread_num=1 --memory \
-            --index="$index" --output_path="$CSV" 2>&1)" || true
-        if ! grep -q '^Throughput' <<<"$out"; then  # GRE exits 0 even on an unknown index
-            echo "failed:"
-            tail -5 <<<"$out"
-            exit 1
-        fi
-        echo "$(grep '^Throughput' <<<"$out") ops/s  ($((SECONDS - start)) s)"
+    for workload in "1 0 1 read-only" "0.5 0.5 0.5 balanced" "0 1 0.5 write-only"; do
+        set -- $workload  # read, insert, bulk-load fraction, name
+        for index in "${INDEXES[@]}"; do
+            printf '%-11s %-22s ' "$4" "$index"
+            start=$SECONDS
+            out="$("$GRE/build/microbench" --keys_file="$keys" --keys_file_type=binary --read="$1" --insert="$2" \
+                --init_table_ratio="$3" --operations_num="$n" --table_size=-1 --thread_num=1 --memory \
+                --index="$index" --output_path="$csv" 2>&1)" || true
+            if ! grep -q '^Throughput' <<<"$out"; then  # GRE exits 0 even on an unknown index
+                echo "failed:"
+                tail -5 <<<"$out"
+                exit 1
+            fi
+            echo "$(grep '^Throughput' <<<"$out") ops/s  ($((SECONDS - start)) s)"
+        done
     done
+    echo
+    python3 "$HERE/table.py" "$csv" "$keys"
+}
+
+for source in "${SOURCES[@]}"; do
+    run_dataset "$source"
 done
-echo
-python3 "$HERE/table.py" "$CSV" "$KEYS"
