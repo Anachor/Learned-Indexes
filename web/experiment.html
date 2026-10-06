@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experiment</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="back" href="/">&larr; experiments</a>
+  <h1><select id="experiment" aria-label="experiment"></select></h1>
+</header>
+
+<main>
+  <nav id="tabs" class="tabs" role="tablist" hidden>
+    <button type="button" role="tab" data-tab="plots" class="active" aria-selected="true">Plots</button>
+    <button type="button" role="tab" data-tab="simulate" aria-selected="false" hidden>Simulate</button>
+  </nav>
+
+  <div id="tab-plots" role="tabpanel">
+    <div id="pickers" class="pickers" hidden>
+      <label>
+        <span>Run</span>
+        <select id="run"></select>
+      </label>
+      <label>
+        <span>n</span>
+        <select id="n"></select>
+      </label>
+      <a id="csv" class="csv" hidden>download CSV</a>
+      <dl id="run-meta" class="run-meta"></dl>
+    </div>
+
+    <h2 id="n-heading" class="section" hidden></h2>
+    <div id="figures"></div>
+  </div>
+
+  <section id="tab-simulate" role="tabpanel" hidden>
+    <form id="simulate-form" class="pickers">
+      <label>
+        <span>Run</span>
+        <select id="sim-run"></select>
+      </label>
+      <div class="field">
+        <span id="sim-n-label">n</span>
+        <div class="combo">
+          <input id="sim-n" type="text" inputmode="numeric" autocomplete="off" required
+            aria-labelledby="sim-n-label">
+          <button id="sim-n-open" type="button" aria-label="the run's n values"
+            aria-haspopup="listbox" aria-expanded="false">&#9662;</button>
+          <ul id="sim-n-values" class="combo-list" role="listbox" hidden></ul>
+        </div>
+      </div>
+      <label>
+        <span>start</span>
+        <input id="sim-start" class="short" type="text" autocomplete="off" placeholder="n/2"
+          title="A number or an expression in n: n/2, 3n/4, n-100, (n+1)/3">
+      </label>
+      <label>
+        <span>end</span>
+        <input id="sim-end" class="short" type="text" autocomplete="off" placeholder="n/2"
+          title="A number or an expression in n: n/2, 3n/4, n-100, (n+1)/3">
+      </label>
+      <label>
+        <span>steps</span>
+        <input id="sim-steps" class="short" type="number" min="1" max="100" step="1" placeholder="1">
+      </label>
+      <label>
+        <span>tiebreaker</span>
+        <select id="sim-tiebreaker" title="The best δ when several have the same qc">
+          <option value="minlambda">min λ</option>
+          <option value="mindelta">min δ</option>
+        </select>
+      </label>
+      <button id="sim-simulate" type="submit"
+        title="The best segments from start to end in equal steps, both included">Simulate</button>
+      <p id="sim-status" class="status"></p>
+    </form>
+
+    <p class="status">Plays the best &delta;'s segments as the prefix grows: from <i>start</i> to
+      <i>end</i> in <i>steps</i> equal steps, both ends included; start and end can be
+      expressions in n, like n/3, 3n/4 or n-100, rounded to a whole number (empty: start = end = n/2,
+      steps 1, so the one prefix t = n/2; start = end is always a single prefix, and t = 0,
+      the empty prefix, is skipped), with the run's seed and permutation. Each prefix tries
+      &delta; = 0.5, 1, 1.5, &hellip; until no larger &delta; can lower qc = log&#8322;&delta; + log&#8322;&lambda;.</p>
+
+    <section id="sim-player" hidden>
+      <h3 id="player-heading" class="section"></h3>
+      <div class="player-controls">
+        <button id="player-prev" type="button" title="Previous prefix (←)">&#9664;</button>
+        <button id="player-play" type="button">Pause</button>
+        <button id="player-next" type="button" title="Next prefix (→)">&#9654;</button>
+        <input id="player-frame" type="range" min="0" max="7" step="1" value="0" aria-label="prefix">
+        <button class="segments-toggle" type="button" aria-pressed="false">Hide segments</button>
+      </div>
+      <p id="player-label" class="player-label"></p>
+      <div class="sim-view">
+        <div class="sim-main">
+          <p id="plot-heading" class="status"></p>
+          <canvas id="sim-plot" class="plot"></canvas>
+          <p class="status small">Keys against rank, each segment's line with its &plusmn;&delta; band, keys
+            over 1..n so the prefix fills in. Click a row to draw that &delta; (pauses).
+            Keys: &larr; &rarr; step through the prefixes, &uarr; &darr; move through the &delta;s. Drag across
+            the plot to zoom in on a range of keys, double-click to zoom out.</p>
+          <p class="status small">This prefix's table from the command line: <code id="sim-command"></code></p>
+        </div>
+        <div class="sim-side">
+          <div class="table-wrap">
+          <table id="sim-table" class="deltas">
+            <thead>
+              <tr><th>&delta;</th><th>&lambda;</th><th>qc</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          </div>
+          <p id="sim-stop" class="status small"></p>
+        </div>
+      </div>
+    </section>
+  </section>
+</main>
+
+<script src="/simulate.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

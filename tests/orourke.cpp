@@ -99,49 +99,62 @@ TestCase<T> generate_testcase(size_t n, T delta,
     return tc;
 }
 
-// Minimum number of segments covering the test case, using the given O'Rourke.
+// Allowed floating-point error when checking lines.
+const long double LINE_EPS = 1e-9;
+
+// Result of feeding a test case to an O'Rourke implementation point by point.
+struct RunResult {
+    size_t segments = 0;
+    // Largest |line(x) - y| - delta over the points each line covers, for every
+    // closed line and for current() after every add_point. <= 0 means valid.
+    long double line_excess = 0;
+};
+
 template <typename T>
-size_t count_segments(ORourke<T> &orourke, const TestCase<T> &tc) {
+RunResult run(ORourke<T> &orourke, const TestCase<T> &tc) {
     tc.validate();
-    if (tc.x.empty()) return 0;
+    RunResult r;
+    if (tc.x.empty()) return r;
 
-    orourke.reset(tc.delta);
-    size_t segments = 1;
-    for (size_t i = 0; i < tc.x.size(); ++i) {
-        if (orourke.add_point(tc.x[i], tc.y[i])) ++segments;
-    }
-    return segments;
-}
-
-// Largest |line(x) - y| over all points, where line is the one PGM returns
-// (get_floating_point_segment) for the segment containing the point.
-template <typename T>
-long double pgm_max_error(const TestCase<T> &tc) {
-    tc.validate();
-    using Model = pgm::internal::OptimalPiecewiseLinearModel<T, T>;
-    Model model(tc.delta);
-    long double worst = 0;
-
-    // Checks points [start, end) against the segment's line.
-    auto check = [&](const typename Model::CanonicalSegment &seg, size_t start, size_t end) {
-        T origin = seg.get_first_x();
-        auto [slope, intercept] = seg.get_floating_point_segment(origin);
-        for (size_t k = start; k < end; ++k) {
-            long double pred = slope * ((long double)tc.x[k] - (long double)origin) + (long double)intercept;
-            worst = std::max(worst, std::abs(pred - (long double)tc.y[k]));
+    // Updates line_excess for points [begin, end) against line l.
+    auto check = [&](const Line &l, size_t begin, size_t end) {
+        for (size_t k = begin; k < end; ++k) {
+            long double err = std::abs(l((long double)tc.x[k]) - (long double)tc.y[k]) - tc.delta;
+            r.line_excess = std::max(r.line_excess, err);
         }
     };
 
-    size_t start = 0;
+    orourke.reset(tc.delta);
+    r.segments = 1;
+    size_t begin = 0;
     for (size_t i = 0; i < tc.x.size(); ++i) {
-        if (!model.add_point(tc.x[i], tc.y[i])) {
-            check(model.get_segment(), start, i);
-            start = i;
-            model.add_point(tc.x[i], tc.y[i]);
+        if (auto closed = orourke.add_point(tc.x[i], tc.y[i])) {
+            check(*closed, begin, i);
+            begin = i;
+            ++r.segments;
         }
+        check(orourke.current(), begin, i + 1);
     }
-    if (!tc.x.empty()) check(model.get_segment(), start, tc.x.size());
-    return worst;
+    return r;
+}
+
+// Checks segmentation(x) against the brute-force segment count for y = index,
+// and that the segments cover 0..n-1 in order without gaps.
+template <typename T>
+bool segmentation_ok(ORourke<T> &orourke, BruteORourke<T> &brute, const TestCase<T> &tc) {
+    TestCase<T> ranks = tc;
+    for (size_t i = 0; i < ranks.y.size(); ++i) ranks.y[i] = T(i);
+
+    orourke.reset(tc.delta);
+    auto segments = orourke.segmentation(tc.x);
+    if (segments.size() != run(brute, ranks).segments) return false;
+
+    size_t next = 0;
+    for (const auto &s : segments) {
+        if (s.begin != next || s.end <= s.begin) return false;
+        next = s.end;
+    }
+    return next == tc.x.size();
 }
 
 // A random test case for the stress tests (sets the global seed to the case's
@@ -174,22 +187,33 @@ void print_points(const TestCase<int64_t> &tc) {
     std::cout << std::endl;
 }
 
-// Compares an O'Rourke implementation against BruteORourke on random test
-// cases. Returns false and prints the failing case on the first mismatch.
-// verbosity 1: print both outputs for every case. 2: also print x and y.
+// Tests an O'Rourke implementation on random test cases: segment count equals
+// BruteORourke's, every line is within delta of its points, and
+// segmentation() is correct. Returns false and prints the failing case on the
+// first failure.
+// verbosity 1: print the results for every case. 2: also print x and y.
 bool stress_test(ORourke<int64_t> &orourke, const std::string &impl, int iterations,
                  int verbosity, int MAXN, int MAXD) {
     BruteORourke<int64_t> brute(0);
     std::mt19937_64 rng(seed);
     for (int it = 0; it < iterations; ++it) {
         auto [tc, desc] = random_testcase(rng, MAXN, MAXD);
-        size_t expected = count_segments(brute, tc);
-        size_t actual = count_segments(orourke, tc);
-        std::string result = " brute=" + std::to_string(expected) + " " + impl + "=" + std::to_string(actual);
+        RunResult expected = run(brute, tc);
+        RunResult actual = run(orourke, tc);
+        bool seg_ok = segmentation_ok(orourke, brute, tc);
+        std::string result = " brute=" + std::to_string(expected.segments) + " " + impl + "=" +
+                             std::to_string(actual.segments) + " line_excess=" +
+                             std::to_string(double(actual.line_excess)) +
+                             " segmentation=" + (seg_ok ? "ok" : "wrong");
         if (verbosity >= 1) std::cout << "case " << it << " (" << desc << ")" << result << std::endl;
         if (verbosity >= 2) print_points(tc);
-        if (expected != actual) {
-            std::cout << impl << ": MISMATCH on case " << desc << result << std::endl;
+
+        const char *failure = expected.segments != actual.segments ? "MISMATCH"
+                              : actual.line_excess > LINE_EPS      ? "LINE ERROR"
+                              : !seg_ok                            ? "SEGMENTATION ERROR"
+                                                                   : nullptr;
+        if (failure) {
+            std::cout << impl << ": " << failure << " on case " << desc << result << std::endl;
             return false;
         }
     }
@@ -197,28 +221,9 @@ bool stress_test(ORourke<int64_t> &orourke, const std::string &impl, int iterati
     return true;
 }
 
-// Checks PGM's returned lines are within delta on random test cases. Returns
-// false and prints the failing case on the first failure.
-bool pgm_line_test(int iterations, int verbosity, int MAXN, int MAXD) {
-    std::mt19937_64 rng(seed);
-    for (int it = 0; it < iterations; ++it) {
-        auto [tc, desc] = random_testcase(rng, MAXN, MAXD);
-        long double line_error = pgm_max_error(tc);
-        std::string result = " line_error=" + std::to_string(double(line_error));
-        if (verbosity >= 1) std::cout << "case " << it << " (" << desc << ")" << result << std::endl;
-        if (verbosity >= 2) print_points(tc);
-        if (line_error > tc.delta) {
-            std::cout << "pgm lines: LINE ERROR on case " << desc << result << std::endl;
-            return false;
-        }
-    }
-    std::cout << "pgm lines: all " << iterations << " cases passed" << std::endl;
-    return true;
-}
-
 void usage(const char *prog) {
     std::cerr << "usage: " << prog << " [-v | -vv] [-i iterations] [-n MAXN] [-d MAXD] [seed]\n"
-              << "  -v          print both outputs for every case\n"
+              << "  -v          print the results for every case\n"
               << "  -vv         also print x and y\n"
               << "  -i N        number of cases (default " << DEFAULT_ITERATIONS << ")\n"
               << "  -n N        n is drawn from 1..N (default " << DEFAULT_MAXN << ")\n"
@@ -279,7 +284,5 @@ int main(int argc, char **argv) {
     bool ok = stress_test(pgm, "pgm", iterations, verbosity, MAXN, MAXD);
     seed = start_seed;
     ok &= stress_test(zlw, "zlw", iterations, verbosity, MAXN, MAXD);
-    seed = start_seed;
-    ok &= pgm_line_test(iterations, verbosity, MAXN, MAXD);
     return ok ? 0 : 1;
 }

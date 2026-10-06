@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Build experiments/exp2/exp2 with the git commit baked in, so every run's
+# meta.json records the code that produced it.
+#
+#   experiments/exp2/build.sh          (CXX overrides the compiler)
+#
+# dirty is true when the code the results depend on - exp2.cpp, the shared
+# experiments/common/, src/ and third_party/ (but GRE, used by bench/gre only)
+# - has uncommitted changes, untracked files included. Changes elsewhere (plots,
+# the web server, notes) do not affect results, so they do not count.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+CXX="${CXX:-$(command -v g++-11 || echo g++)}"
+
+cd "$ROOT"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ "$COMMIT" = unknown ]; then
+    DIRTY=unknown
+elif [ -n "$(git status --porcelain -- experiments/exp2/exp2.cpp experiments/common src third_party ':!third_party/GRE')" ]; then
+    DIRTY=true
+else
+    DIRTY=false
+fi
+
+"$CXX" -std=c++17 -O3 -fopenmp \
+    -DGIT_COMMIT="\"$COMMIT\"" -DGIT_DIRTY="\"$DIRTY\"" \
+    experiments/exp2/exp2.cpp -o experiments/exp2/exp2
+
+echo "built experiments/exp2/exp2 (commit $COMMIT, dirty $DIRTY, $("$CXX" --version | head -1))"

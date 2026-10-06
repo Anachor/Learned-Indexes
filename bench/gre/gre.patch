@@ -1,0 +1,54 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0138c3c..a6deafe 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -27,6 +27,11 @@ add_compile_options(-faligned-new -march=native -g -O3)
+ add_subdirectory(src/competitor/wormhole_u64)
+ add_subdirectory(src/competitor/masstree)
+ 
++# The GPLA, from the repository GRE is in (bench/gre). It needs C++20,
++# which ALEX and the STX B+-tree do not build under, so it is compiled apart.
++add_library(GPLA STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../../bench/gre/gpla_index.cpp)
++set_target_properties(GPLA PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
++
+ # microbench
+ add_executable(microbench
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/benchmark/microbench.cpp
+@@ -37,6 +42,7 @@ target_link_libraries(microbench
+         # WORMHOLE
+         WORMHOLEU64
+         MASSTREE
++        GPLA
+ )
+ 
+ target_link_libraries(microbench PUBLIC OpenMP::OpenMP_CXX ${JEMALLOC_LIBRARIES} ${MKL_LIBRARIES} ${TBB_LIBRARIES})
+diff --git a/src/competitor/competitor.h b/src/competitor/competitor.h
+index df4c5e5..46c001f 100644
+--- a/src/competitor/competitor.h
++++ b/src/competitor/competitor.h
+@@ -16,6 +16,7 @@
+ #include "wormhole_u64/wormhole_u64.h"
+ #include "masstree/masstree.h"
+ #include "finedex/finedex.h"
++#include "../../../../bench/gre/gpla_index.h"  // the GPLA, from the repository GRE is in
+ #include "iostream"
+ 
+ template<class KEY_TYPE, class PAYLOAD_TYPE>
+@@ -72,6 +73,17 @@ indexInterface<KEY_TYPE, PAYLOAD_TYPE> *get_index(std::string index_type) {
+   else if (index_type == "finedex") {
+     index = new finedexInterface<KEY_TYPE, PAYLOAD_TYPE>;
+   }
++  else if (index_type.rfind("gpla", 0) == 0) {
++    index = nullptr;
++    if constexpr (std::is_same_v<KEY_TYPE, uint64_t> && std::is_same_v<PAYLOAD_TYPE, uint64_t>) {
++      index = make_gpla_index(index_type);
++    }
++    if (!index) {
++      std::cout << "Could not find a matching index called " << index_type
++                << " (gpla, or with parts such as gpla-delta8, gpla-vector, gpla-leaf16, gpla-delta8-vector).\n";
++      exit(0);
++    }
++  }
+   else {
+     std::cout << "Could not find a matching index called " << index_type << ".\n";
+     exit(0);

@@ -1,1 +1,28 @@
+# Binaries, each built from the .cpp of the same name (see README)
+tests/fitter
+tests/gpla
+tests/gpla_speed
+tests/hulls
 tests/orourke
+tests/orourke_speed
+tests/pma
+tests/pma_api
+experiments/exp1/exp1
+experiments/exp2/exp2
+experiments/exp3/exp3
+experiments/exp4/exp4
+bench/gre/sample
+*.o
+*.a
+*.so
+a.out
+
+# Experiment output
+results/
+figures/
+
+# Python
+venv/
+__pycache__/
+
+.claude/
